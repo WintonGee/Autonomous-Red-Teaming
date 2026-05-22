@@ -5,6 +5,7 @@ from typing import Optional
 
 from src.memory.store import MemoryStore
 from src.skills.base import Skill
+from src.skills.web.exposed_sensitive_paths import ExposedSensitivePaths
 from src.skills.web.missing_security_headers import MissingSecurityHeaders
 
 
@@ -25,6 +26,7 @@ class SkillRegistry:
     def with_defaults(cls) -> "SkillRegistry":
         registry = cls()
         registry.register(MissingSecurityHeaders())
+        registry.register(ExposedSensitivePaths())
         return registry
 
     def seed_semantic(self, store: MemoryStore) -> None:

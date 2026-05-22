@@ -1,20 +1,25 @@
-"""Orchestrator: runs one full learning cycle and enforces the safety gates.
+"""Orchestrator: runs learning cycles / engagements and enforces the safety gates.
 
-Cycle: authorize target -> fresh working memory -> plan -> gate action ->
-execute (scoped tool) -> evaluate -> persist finding (deduped) -> learn ->
-score. Every stage writes to memory; the cycle returns a report including the
-rendered working-memory blocks.
+Two entrypoints:
+  run_cycle      - one planned skill, scored (the learning-loop demo).
+  run_engagement - run every eligible skill through the gates in one engagement,
+                   collect deduped findings + evidence (a real assessment).
 
-The agents' brains are deterministic by default (offline, testable). Wiring an
-LLM means swapping a reasoner — start with the Learner (see src/README.md).
+Every stage writes to memory. Authorization includes fingerprint identity
+verification (fail closed). Agent brains are deterministic by default; wiring an
+LLM means swapping a reasoner (see src/README.md).
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 from typing import Callable, Optional
 
 from src.agents import (
@@ -27,7 +32,13 @@ from src.agents import (
     SkillInfo,
     Verdict,
 )
-from src.authorization import AuthorizationError, AuthorizationGuard, AuthorizationRegistry
+from src.authorization import (
+    AuthorizationError,
+    AuthorizationGuard,
+    AuthorizationRegistry,
+    HttpFingerprinter,
+    StaticFingerprinter,
+)
 from src.memory.dedup import content_hash
 from src.memory.gc import run_gc
 from src.memory.session import start_engagement
@@ -51,6 +62,18 @@ class CycleReport:
     context_blocks: list = field(default_factory=list)
 
 
+@dataclass
+class EngagementReport:
+    authorization_id: str
+    goal: str
+    engagement_id: str
+    identity_ok: bool = False
+    findings: list = field(default_factory=list)
+    skill_outcomes: list = field(default_factory=list)
+    evidence_dir: Optional[str] = None
+    context_blocks: list = field(default_factory=list)
+
+
 class Orchestrator:
     def __init__(
         self,
@@ -63,6 +86,8 @@ class Orchestrator:
         planner: Optional[Planner] = None,
         evaluator: Optional[Evaluator] = None,
         learner: Optional[Learner] = None,
+        evidence_dir: Optional[str] = None,
+        rate_sleep: Optional[Callable[[float], None]] = None,
     ) -> None:
         self.store = store
         self.guard = guard
@@ -73,6 +98,9 @@ class Orchestrator:
         self.planner = planner or Planner()
         self.evaluator = evaluator or Evaluator()
         self.learner = learner or Learner()
+        self.evidence_dir = evidence_dir
+        # Rate-limiter sleep: real for live runs, no-op offline (nothing to be polite to).
+        self.rate_sleep = rate_sleep or time.sleep
         self.skills.seed_semantic(store)  # idempotent
 
     def _skill_infos(self) -> list[SkillInfo]:
@@ -92,10 +120,109 @@ class Orchestrator:
             )
         return infos
 
+    def _store_evidence(self, engagement_id: str, authorization_id: str, skill_id: str, finding: dict) -> Optional[int]:
+        if not self.evidence_dir:
+            return None
+        target_dir = os.path.join(self.evidence_dir, engagement_id)
+        os.makedirs(target_dir, exist_ok=True)
+        path = os.path.join(target_dir, f"{skill_id}.json")
+        payload = json.dumps(finding, indent=2, sort_keys=True)
+        Path(path).write_text(payload)
+        sha = hashlib.sha256(payload.encode()).hexdigest()
+        return self.store.add_evidence_ref(
+            engagement_id=engagement_id, authorization_id=authorization_id,
+            path=path, sha256=sha, media_type="application/json", size_bytes=len(payload),
+        )
+
+    def _persist_finding(self, engagement_id: str, auth_id: str, skill_id: str, finding: dict) -> tuple[bool, Optional[int]]:
+        """Write a finding if not a duplicate. Returns (is_new, evidence_ref)."""
+        fh = content_hash(json.dumps(finding, sort_keys=True))
+        exists = self.store.conn.execute(
+            "SELECT 1 FROM semantic_items WHERE kind='finding' AND content_hash=? AND authorization_id=?",
+            (fh, auth_id),
+        ).fetchone()
+        if exists:
+            return False, None
+        evidence_ref = self._store_evidence(engagement_id, auth_id, skill_id, finding)
+        self.store.add_semantic_item(
+            kind="finding", title=finding["title"], authorization_id=auth_id,
+            content=finding, tags=[finding.get("category", "unknown")],
+        )
+        return True, evidence_ref
+
+    # --------------------------------------------------------------- engagement
+    def run_engagement(self, authorization_id: str, goal: str, today: Optional[date] = None) -> EngagementReport:
+        engagement_id = uuid.uuid4().hex[:12]
+
+        # Authorize + fingerprint-verify the target (fail closed).
+        auth = self.guard.authorize_target(authorization_id, today)
+        max_risk = self.risk_engine.max_allowed(auth.risk_limit)
+        wm = start_engagement(
+            self.store, authorization_id=auth.id,
+            authorization_facts={"scope": auth.target, "risk_limit": auth.risk_limit, "max_risk": max_risk},
+            goal=goal,
+        )
+        report = EngagementReport(authorization_id=auth.id, goal=goal, engagement_id=engagement_id,
+                                  identity_ok=True, evidence_dir=self.evidence_dir)
+        try:
+            rate = RateLimiter(auth.rate_limit.get("max_requests_per_second", 1), sleep=self.rate_sleep)
+            http = HttpClient(allowed_urls={auth.target}, fetch=self.fetch, rate_limiter=rate)
+            executor = Executor(http, self.skills)
+
+            infos = self._skill_infos()
+            infos.sort(key=lambda s: (-s.signal_ratio, s.runs, s.skill_id))  # planner priority
+            for info in infos:
+                outcome = {"skill_id": info.skill_id, "ran": False, "has_signal": False, "blocked_reason": None}
+                action = ProposedAction(skill_id=info.skill_id, target_url=auth.target,
+                                        action_type=info.action_type, risk_level=info.risk_level,
+                                        rationale=f"engagement skill {info.skill_id}")
+                # Gate every action (fail closed).
+                try:
+                    self.guard.authorize_action(auth, action.action_type, action.risk_level)
+                except AuthorizationError as exc:
+                    outcome["blocked_reason"] = str(exc)
+                    self.store.add_event(engagement_id=engagement_id, authorization_id=auth.id,
+                                         event_type="decision", content=f"BLOCKED {info.skill_id}: {exc}",
+                                         salience="salient")
+                    report.skill_outcomes.append(outcome)
+                    continue
+
+                result = executor.execute(action)
+                outcome["ran"] = True
+                self.store.add_event(engagement_id=engagement_id, authorization_id=auth.id,
+                                     event_type="tool_output", content=json.dumps(result.observations)[:500],
+                                     salience="ephemeral")
+
+                verdict = self.evaluator.evaluate(result)
+                outcome["has_signal"] = verdict.has_signal
+                wm.add(f"{info.skill_id}: {verdict.rationale}", salience="salient")
+                self.store.add_event(engagement_id=engagement_id, authorization_id=auth.id,
+                                     event_type="evaluation", content=f"{info.skill_id}: {verdict.rationale}",
+                                     salience="salient")
+
+                if verdict.finding:
+                    is_new, evidence_ref = self._persist_finding(engagement_id, auth.id, info.skill_id, verdict.finding)
+                    report.findings.append({
+                        "skill_id": info.skill_id, "title": verdict.finding["title"],
+                        "severity": verdict.finding.get("severity"), "new": is_new,
+                        "evidence_ref": evidence_ref, "finding": verdict.finding,
+                    })
+
+                self.scorer.record(skill_id=info.skill_id, authorization_id=auth.id,
+                                   had_signal=verdict.has_signal, finding_confirmed=bool(verdict.finding),
+                                   error=verdict.failure_reason)
+                report.skill_outcomes.append(outcome)
+
+            report.context_blocks = wm.render()
+            return report
+        finally:
+            run_gc(self.store)
+
+    # -------------------------------------------------------------------- cycle
     def run_cycle(self, authorization_id: str, goal: str, today: Optional[date] = None) -> CycleReport:
         engagement_id = uuid.uuid4().hex[:12]
 
-        # 1. Authorize the target (fail closed). No memory exists yet if this raises.
+        # 1. Authorize + fingerprint-verify the target (fail closed).
         auth = self.guard.authorize_target(authorization_id, today)
 
         # 2. Fresh working memory seeded with pinned safety facts.
@@ -142,7 +269,7 @@ class Orchestrator:
                 return report
 
             # 5. Execute via a target-scoped tool (defense in depth in HttpClient).
-            rate = RateLimiter(auth.rate_limit.get("max_requests_per_second", 1))
+            rate = RateLimiter(auth.rate_limit.get("max_requests_per_second", 1), sleep=self.rate_sleep)
             http = HttpClient(allowed_urls={auth.target}, fetch=self.fetch, rate_limiter=rate)
             result = Executor(http, self.skills).execute(action)
             self.store.add_event(engagement_id=engagement_id, authorization_id=auth.id,
@@ -158,16 +285,8 @@ class Orchestrator:
 
             # 7. Persist the finding (deduped, authorization-scoped).
             if verdict.finding:
-                fh = content_hash(json.dumps(verdict.finding, sort_keys=True))
-                exists = self.store.conn.execute(
-                    "SELECT 1 FROM semantic_items WHERE kind='finding' AND content_hash=? AND authorization_id=?",
-                    (fh, auth.id),
-                ).fetchone()
-                if not exists:
-                    self.store.add_semantic_item(kind="finding", title=verdict.finding["title"],
-                                                 authorization_id=auth.id, content=verdict.finding,
-                                                 tags=[verdict.finding.get("category", "unknown")])
-                    report.finding_written = True
+                is_new, _ = self._persist_finding(engagement_id, auth.id, action.skill_id, verdict.finding)
+                report.finding_written = is_new
 
             # 8. Learn (reuse before create; LLM learner is the next milestone).
             proposals = self.learner.learn([verdict], state.available_skills)
@@ -192,18 +311,28 @@ def build_orchestrator(
     store: Optional[MemoryStore] = None,
     registry_path: str = "authorizations/authorized-targets.json",
     dry_run: bool = True,
+    evidence_dir: Optional[str] = None,
 ) -> Orchestrator:
     store = store or MemoryStore(":memory:")
     risk_engine = RiskEngine(project_ceiling=1)
-    guard = AuthorizationGuard(AuthorizationRegistry.load(registry_path), risk_engine)
-    fetch = fake_juice_shop_fetch if dry_run else urllib_fetch
+    if dry_run:
+        fingerprinter = StaticFingerprinter(ok=True)
+        fetch = fake_juice_shop_fetch
+        evidence_dir = None  # offline runs don't write evidence files
+    else:
+        fingerprinter = HttpFingerprinter()
+        fetch = urllib_fetch
+        evidence_dir = evidence_dir or "evidence"
+    guard = AuthorizationGuard(AuthorizationRegistry.load(registry_path), risk_engine, fingerprinter=fingerprinter)
     return Orchestrator(
         store=store, guard=guard, risk_engine=risk_engine,
-        skill_registry=SkillRegistry.with_defaults(), scorer=Scorer(store.conn), fetch=fetch,
+        skill_registry=SkillRegistry.with_defaults(), scorer=Scorer(store.conn),
+        fetch=fetch, evidence_dir=evidence_dir,
+        rate_sleep=(None if not dry_run else (lambda _seconds: None)),  # offline: don't actually sleep
     )
 
 
-def _print_report(report: CycleReport) -> None:
+def _print_cycle(report: CycleReport) -> None:
     print(f"engagement   : {report.engagement_id}")
     print(f"authorization: {report.authorization_id}")
     print(f"goal         : {report.goal}")
@@ -211,24 +340,36 @@ def _print_report(report: CycleReport) -> None:
         print(f"BLOCKED      : {report.blocked_reason}")
     if report.action:
         print(f"plan         : {report.action.skill_id} -> {report.action.target_url}")
-        print(f"               {report.action.rationale}")
     if report.verdict:
-        print(f"verdict      : signal={report.verdict.has_signal} "
-              f"confidence={report.verdict.confidence} :: {report.verdict.rationale}")
-        if report.verdict.finding:
-            print(f"finding      : {report.verdict.finding['title']} "
-                  f"(new={report.finding_written})")
-    print(f"proposals    : {[p.title for p in report.proposals] or 'none (reuse before create)'}")
+        print(f"verdict      : signal={report.verdict.has_signal} :: {report.verdict.rationale}")
+
+
+def _print_engagement(r: EngagementReport) -> None:
+    print(f"engagement   : {r.engagement_id}")
+    print(f"authorization: {r.authorization_id}")
+    print(f"identity     : {'VERIFIED' if r.identity_ok else 'UNVERIFIED'}")
+    print(f"goal         : {r.goal}")
+    print("skills:")
+    for o in r.skill_outcomes:
+        status = "ran" if o["ran"] else f"BLOCKED ({o['blocked_reason']})"
+        print(f"  - {o['skill_id']}: {status}, signal={o['has_signal']}")
+    print(f"findings ({len(r.findings)}):")
+    for f in r.findings:
+        print(f"  - [{f['severity']}] {f['title']}")
+        print(f"      skill={f['skill_id']} new={f['new']} evidence_ref={f['evidence_ref']}")
+    if r.evidence_dir:
+        print(f"evidence     : {r.evidence_dir}/{r.engagement_id}/")
     print("--- working memory (rendered context) ---")
-    for block in report.context_blocks:
-        text = block["text"].replace("\n", " | ")
-        print(f"  [{block['region']:<7}] cacheable={block['cacheable']} :: {text}")
+    for b in r.context_blocks:
+        text = b["text"].replace("\n", " | ")
+        print(f"  [{b['region']:<7}] cacheable={b['cacheable']} :: {text}")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Run one autonomous red-teaming cycle.")
+    parser = argparse.ArgumentParser(description="Run an autonomous red-teaming engagement or cycle.")
     parser.add_argument("--authorization", default="local-juice-shop")
-    parser.add_argument("--goal", default="missing-headers")
+    parser.add_argument("--goal", default="assess")
+    parser.add_argument("--mode", choices=["engagement", "cycle"], default="engagement")
     parser.add_argument("--dry-run", action="store_true", default=True,
                         help="use the offline fake HTTP client (default)")
     parser.add_argument("--live", dest="dry_run", action="store_false",
@@ -237,10 +378,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     orch = build_orchestrator(dry_run=args.dry_run)
-    for i in range(args.cycles):
-        if args.cycles > 1:
-            print(f"\n===== cycle {i + 1}/{args.cycles} =====")
-        _print_report(orch.run_cycle(args.authorization, args.goal))
+    if args.mode == "engagement":
+        _print_engagement(orch.run_engagement(args.authorization, args.goal))
+    else:
+        for i in range(args.cycles):
+            if args.cycles > 1:
+                print(f"\n===== cycle {i + 1}/{args.cycles} =====")
+            _print_cycle(orch.run_cycle(args.authorization, args.goal))
     return 0
 
 

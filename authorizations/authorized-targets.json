@@ -2,11 +2,16 @@
   {
     "id": "local-juice-shop",
     "environment": "learning-lab",
-    "target": "http://localhost:3000",
+    "target": "http://localhost:3001",
     "target_type": "web-application",
     "owner": "Personal lab",
     "authorized_by": "Winton Gee",
-    "authorization_source": "owned-local-environment",
+    "authorization_source": "owned-local-container",
+    "expected_identity": {
+      "title_contains": "OWASP Juice Shop",
+      "marker_path": "/rest/admin/application-version",
+      "marker_contains": "version"
+    },
     "allowed_testing": [
       "reconnaissance",
       "web-misconfiguration-checks",
@@ -19,14 +24,14 @@
       "denial-of-service"
     ],
     "rate_limit": {
-      "max_requests_per_second": 2,
+      "max_requests_per_second": 4,
       "max_concurrent_requests": 1
     },
-    "risk_limit": "low",
+    "risk_limit": "medium",
     "valid_from": "2026-05-10",
     "valid_until": "2026-12-31",
     "policy_url": null,
-    "last_reviewed": "2026-05-10",
-    "notes": "Local lab target only. Do not test external third-party systems."
+    "last_reviewed": "2026-05-21",
+    "notes": "Local Docker Juice Shop on :3001 (owned). Safe-active checks authorized; no destructive/DoS/credential testing. Identity is fingerprint-verified before each engagement."
   }
 ]

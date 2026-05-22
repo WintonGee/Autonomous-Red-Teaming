@@ -6,6 +6,7 @@ testable without a network or live target.
 """
 from .base import Skill
 from .registry import SkillRegistry
+from .web.exposed_sensitive_paths import ExposedSensitivePaths
 from .web.missing_security_headers import MissingSecurityHeaders
 
-__all__ = ["Skill", "SkillRegistry", "MissingSecurityHeaders"]
+__all__ = ["Skill", "SkillRegistry", "MissingSecurityHeaders", "ExposedSensitivePaths"]

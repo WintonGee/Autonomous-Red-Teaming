@@ -11,7 +11,10 @@ venv/
 *.sqlite3
 
 # Sensitive run output (treat as sensitive per README)
-evidence/
+# Keep the evidence/ dir + its README, but never commit captured evidence.
+evidence/*
+!evidence/.gitkeep
+!evidence/README.md
 findings/
 reports/
 logs/

@@ -81,11 +81,18 @@ class HttpClient:
 
 def urllib_fetch(url: str, timeout: float = 10.0) -> HttpResponse:
     """Real GET via the standard library. Used for live runs (e.g. Juice Shop)."""
+    import http.client
     import urllib.request
 
     req = urllib.request.Request(url, method="GET", headers={"User-Agent": "art-lab/0.1"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (lab use)
-        body = resp.read().decode("utf-8", errors="replace")
+        try:
+            raw = resp.read()
+        except http.client.IncompleteRead as exc:
+            # Some endpoints (e.g. directory listings) mis-set Content-Length;
+            # the body we did receive is still valid evidence.
+            raw = exc.partial
+        body = raw.decode("utf-8", errors="replace")
         headers = {k.lower(): v for k, v in resp.headers.items()}
         return HttpResponse(status_code=resp.status, headers=headers, url=url, body=body)
 

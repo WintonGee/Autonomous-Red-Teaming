@@ -1,12 +1,20 @@
-"""Skill base class."""
+"""Skill base class.
+
+A skill carries metadata and detection logic. `run()` may make several *gated*
+requests through the injected HttpClient, so detection is always dynamic (driven
+by live responses), never hardcoded findings. A skill signals a detected issue by
+placing a `finding` dict in the observations it returns; the evaluator confirms
+and scores it.
+"""
 from __future__ import annotations
 
-from src.tools.http_client import HttpResponse
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.tools.http_client import HttpClient
 
 
 class Skill:
-    """Base for detection skills. Subclasses set metadata and implement detect()."""
-
     id: str = ""
     name: str = ""
     category: str = ""
@@ -15,8 +23,11 @@ class Skill:
     target_types: list[str] = []
     tool: str = "http-client"
 
-    def detect(self, response: HttpResponse) -> dict:
-        """Pure detection logic over tool output. Returns structured observations."""
+    def run(self, http: "HttpClient", target_url: str) -> dict:
+        """Execute the skill against target_url via gated requests.
+
+        Returns observations. If an issue is detected, include a `finding` dict.
+        """
         raise NotImplementedError
 
     def to_record(self) -> dict:

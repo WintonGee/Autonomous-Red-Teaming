@@ -29,6 +29,7 @@ class Authorization:
     valid_from: str
     valid_until: str
     rate_limit: dict = field(default_factory=dict)
+    expected_identity: dict = field(default_factory=dict)
     environment: str = ""
     notes: str = ""
 
@@ -44,6 +45,7 @@ class Authorization:
             valid_from=d["valid_from"],
             valid_until=d["valid_until"],
             rate_limit=d.get("rate_limit", {}),
+            expected_identity=d.get("expected_identity", {}),
             environment=d.get("environment", ""),
             notes=d.get("notes", ""),
         )
@@ -70,11 +72,23 @@ class AuthorizationRegistry:
 
 
 class AuthorizationGuard:
-    """Gatekeeper. All methods fail closed: any uncertainty raises."""
+    """Gatekeeper. All methods fail closed: any uncertainty raises.
 
-    def __init__(self, registry: AuthorizationRegistry, risk_engine: RiskEngine) -> None:
+    Identity verification is part of authorization: if an authorization declares
+    expected_identity, the live target is fingerprinted and must match before the
+    target is authorized. An authorization that declares an identity but has no
+    fingerprinter available cannot be verified, so it is refused.
+    """
+
+    def __init__(
+        self,
+        registry: AuthorizationRegistry,
+        risk_engine: RiskEngine,
+        fingerprinter=None,
+    ) -> None:
         self.registry = registry
         self.risk_engine = risk_engine
+        self.fingerprinter = fingerprinter
 
     def authorize_target(self, authorization_id: str, today: Optional[date] = None) -> Authorization:
         today = today or date.today()
@@ -88,6 +102,17 @@ class AuthorizationGuard:
                 f"authorization {authorization_id!r} is not valid on {today.isoformat()} "
                 f"(valid {auth.valid_from}..{auth.valid_until})"
             )
+        if auth.expected_identity:
+            if self.fingerprinter is None:
+                raise AuthorizationError(
+                    f"{authorization_id!r} declares expected_identity but no fingerprinter "
+                    f"is available to verify it (fail closed)"
+                )
+            ok, detail = self.fingerprinter.matches(auth.target, auth.expected_identity)
+            if not ok:
+                raise AuthorizationError(
+                    f"target identity mismatch for {authorization_id!r} at {auth.target}: {detail}"
+                )
         return auth
 
     def authorize_action(self, auth: Authorization, action_type: str, risk_level: int) -> None:

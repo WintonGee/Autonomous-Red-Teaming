@@ -3,9 +3,12 @@
 Risk levels follow the README table:
   0 informational | 1 passive | 2 safe-active | 3 intrusive | 4 prohibited
 
-The project ceiling starts at 1 ("start with levels 0 and 1 only"). The effective
-maximum for any engagement is min(authorization risk_limit, project ceiling).
-Level 4 (prohibited) is never allowed, regardless of configuration.
+A properly-authorized target carries its own risk_limit, and that elevation is
+honored directly — the project ceiling is NOT a global cap on properly-authorized
+targets (otherwise every new authorization silently inherits one lab's ceiling).
+The project ceiling instead acts as the conservative fallback for a missing or
+malformed authorization. Level 4 (prohibited) is never allowed, and risk level 3+
+should additionally pass the (future) human-approval gate before execution.
 """
 from __future__ import annotations
 
@@ -32,9 +35,15 @@ class RiskEngine:
         self.project_ceiling = project_ceiling
 
     def max_allowed(self, risk_limit: str) -> int:
-        """Effective max risk = min(authorization limit, project ceiling)."""
-        auth_level = RISK_LIMIT_TO_LEVEL.get(risk_limit, 0)
-        return min(auth_level, self.project_ceiling)
+        """Max risk for a target.
+
+        A known, properly-authorized risk_limit is honored directly. A missing or
+        malformed risk_limit falls back to the conservative project ceiling.
+        """
+        level = RISK_LIMIT_TO_LEVEL.get(risk_limit)
+        if level is None:
+            return self.project_ceiling
+        return level
 
     def within(self, risk_level: int, max_allowed: int) -> bool:
         """True only if the action is at/below the ceiling and not prohibited."""

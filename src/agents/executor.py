@@ -22,7 +22,8 @@ class Executor:
         if skill.tool != "http-client":
             return ExecutionResult(action, ok=False, error=f"unsupported tool {skill.tool!r}")
         try:
-            response = self.http.get(action.target_url)
+            # The skill drives its own (gated) requests via the HttpClient.
+            observations = skill.run(self.http, action.target_url)
         except Exception as exc:  # tool-layer refusal, network error, timeout
             return ExecutionResult(action, ok=False, error=f"{type(exc).__name__}: {exc}")
-        return ExecutionResult(action, ok=True, observations=skill.detect(response))
+        return ExecutionResult(action, ok=True, observations=observations)

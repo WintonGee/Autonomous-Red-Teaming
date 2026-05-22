@@ -42,6 +42,8 @@ class RuleBasedPlanner:
 
 class RuleBasedEvaluator:
     def evaluate(self, result: ExecutionResult) -> Verdict:
+        # Skill-agnostic: detection logic lives in the skill, which surfaces a
+        # `finding` in its observations. The evaluator confirms and scores it.
         if not result.ok:
             return Verdict(
                 action=result.action,
@@ -50,32 +52,20 @@ class RuleBasedEvaluator:
                 failure_reason=result.error,
                 rationale="Execution failed; no evaluation possible.",
             )
-        missing = result.observations.get("missing_headers") or []
-        if missing:
-            finding = {
-                "title": f"Missing security headers: {', '.join(missing)}",
-                "category": "web-misconfiguration",
-                "severity": "low",
-                "confidence": "confirmed",
-                "skill_id": result.action.skill_id,
-                "target": result.action.target_url,
-                "evidence": {
-                    "status_code": result.observations.get("status_code"),
-                    "missing_headers": missing,
-                },
-            }
+        finding = result.observations.get("finding")
+        if finding and finding.get("evidence"):
             return Verdict(
                 action=result.action,
                 has_signal=True,
-                confidence="confirmed",
+                confidence=finding.get("confidence", "confirmed"),
                 finding=finding,
-                rationale=f"Confirmed {len(missing)} missing security header(s).",
+                rationale=finding.get("title", "Issue detected."),
             )
         return Verdict(
             action=result.action,
             has_signal=False,
             confidence="none",
-            rationale="No missing security headers detected.",
+            rationale="No issue detected.",
         )
 
 

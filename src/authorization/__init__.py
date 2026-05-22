@@ -4,6 +4,7 @@ Every target and action is checked here, in code, before anything touches a
 remote system. Checks fail closed: missing, expired, ambiguous, or out-of-scope
 authorization stops the run.
 """
+from .fingerprint import Fingerprinter, HttpFingerprinter, StaticFingerprinter
 from .registry import (
     Authorization,
     AuthorizationError,
@@ -16,4 +17,7 @@ __all__ = [
     "AuthorizationError",
     "AuthorizationGuard",
     "AuthorizationRegistry",
+    "Fingerprinter",
+    "HttpFingerprinter",
+    "StaticFingerprinter",
 ]
