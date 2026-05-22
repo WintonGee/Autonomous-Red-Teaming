@@ -59,6 +59,7 @@ class Verdict:
     finding: Optional[dict] = None
     failure_reason: Optional[str] = None
     rationale: str = ""
+    extra_findings: list = field(default_factory=list)  # LLM-discovered, pending review
 
 
 @dataclass

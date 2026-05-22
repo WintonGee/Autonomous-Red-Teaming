@@ -32,6 +32,7 @@ from src.agents import (
     SkillInfo,
     Verdict,
 )
+from src.agents.reasoners import RuleBasedEvaluator, RuleBasedLearner, RuleBasedPlanner
 from src.authorization import (
     AuthorizationError,
     AuthorizationGuard,
@@ -68,6 +69,7 @@ class EngagementReport:
     goal: str
     engagement_id: str
     identity_ok: bool = False
+    llm_active: bool = False
     findings: list = field(default_factory=list)
     skill_outcomes: list = field(default_factory=list)
     evidence_dir: Optional[str] = None
@@ -88,6 +90,7 @@ class Orchestrator:
         learner: Optional[Learner] = None,
         evidence_dir: Optional[str] = None,
         rate_sleep: Optional[Callable[[float], None]] = None,
+        llm_client=None,
     ) -> None:
         self.store = store
         self.guard = guard
@@ -99,9 +102,21 @@ class Orchestrator:
         self.evaluator = evaluator or Evaluator()
         self.learner = learner or Learner()
         self.evidence_dir = evidence_dir
+        self.llm_client = llm_client  # set when LLM brains are active; None otherwise
         # Rate-limiter sleep: real for live runs, no-op offline (nothing to be polite to).
         self.rate_sleep = rate_sleep or time.sleep
         self.skills.seed_semantic(store)  # idempotent
+
+    def _drain_llm_audit(self, engagement_id: str, authorization_id: str) -> None:
+        """Persist a durable record of each external LLM call (no raw payload)."""
+        if self.llm_client is None:
+            return
+        for record in self.llm_client.drain_audit():
+            self.store.add_event(
+                engagement_id=engagement_id, authorization_id=authorization_id,
+                event_type="llm_call", content=json.dumps(record, sort_keys=True),
+                salience="salient",
+            )
 
     def _skill_infos(self) -> list[SkillInfo]:
         infos = []
@@ -150,6 +165,22 @@ class Orchestrator:
         )
         return True, evidence_ref
 
+    def _persist_extra_finding(self, auth_id: str, finding: dict) -> bool:
+        """Persist an LLM-discovered finding as pending_review (deduped). Returns is_new."""
+        fh = content_hash(json.dumps(finding, sort_keys=True))
+        exists = self.store.conn.execute(
+            "SELECT 1 FROM semantic_items WHERE kind='finding' AND content_hash=? AND authorization_id=?",
+            (fh, auth_id),
+        ).fetchone()
+        if exists:
+            return False
+        self.store.add_semantic_item(
+            kind="finding", title=finding["title"], authorization_id=auth_id,
+            content=finding, tags=[finding.get("category", "unknown")],
+            source=finding.get("source", "llm-evaluator"), status="pending_review",
+        )
+        return True
+
     # --------------------------------------------------------------- engagement
     def run_engagement(self, authorization_id: str, goal: str, today: Optional[date] = None) -> EngagementReport:
         engagement_id = uuid.uuid4().hex[:12]
@@ -163,7 +194,8 @@ class Orchestrator:
             goal=goal,
         )
         report = EngagementReport(authorization_id=auth.id, goal=goal, engagement_id=engagement_id,
-                                  identity_ok=True, evidence_dir=self.evidence_dir)
+                                  identity_ok=True, evidence_dir=self.evidence_dir,
+                                  llm_active=self.llm_client is not None)
         try:
             rate = RateLimiter(auth.rate_limit.get("max_requests_per_second", 1), sleep=self.rate_sleep)
             http = HttpClient(allowed_urls={auth.target}, fetch=self.fetch, rate_limiter=rate)
@@ -171,6 +203,7 @@ class Orchestrator:
 
             infos = self._skill_infos()
             infos.sort(key=lambda s: (-s.signal_ratio, s.runs, s.skill_id))  # planner priority
+            verdicts: list[Verdict] = []
             for info in infos:
                 outcome = {"skill_id": info.skill_id, "ran": False, "has_signal": False, "blocked_reason": None}
                 action = ProposedAction(skill_id=info.skill_id, target_url=auth.target,
@@ -194,6 +227,7 @@ class Orchestrator:
                                      salience="ephemeral")
 
                 verdict = self.evaluator.evaluate(result)
+                verdicts.append(verdict)
                 outcome["has_signal"] = verdict.has_signal
                 wm.add(f"{info.skill_id}: {verdict.rationale}", salience="salient")
                 self.store.add_event(engagement_id=engagement_id, authorization_id=auth.id,
@@ -205,7 +239,17 @@ class Orchestrator:
                     report.findings.append({
                         "skill_id": info.skill_id, "title": verdict.finding["title"],
                         "severity": verdict.finding.get("severity"), "new": is_new,
-                        "evidence_ref": evidence_ref, "finding": verdict.finding,
+                        "evidence_ref": evidence_ref, "source": "skill", "finding": verdict.finding,
+                    })
+
+                # LLM-discovered findings are persisted as pending_review, never auto-trusted.
+                for extra in verdict.extra_findings:
+                    is_new = self._persist_extra_finding(auth.id, extra)
+                    report.findings.append({
+                        "skill_id": info.skill_id, "title": extra["title"],
+                        "severity": extra.get("severity"), "new": is_new,
+                        "source": extra.get("source", "llm-evaluator"),
+                        "review": "pending_review", "finding": extra,
                     })
 
                 self.scorer.record(skill_id=info.skill_id, authorization_id=auth.id,
@@ -213,6 +257,13 @@ class Orchestrator:
                                    error=verdict.failure_reason)
                 report.skill_outcomes.append(outcome)
 
+            # Learn across the engagement's verdicts -> reviewed skill proposals.
+            for proposal in self.learner.learn(verdicts, infos):
+                self.store.add_semantic_item(
+                    kind="skill", title=proposal.title, content=proposal.payload,
+                    tags=[proposal.category], source="distilled", status="pending_review",
+                )
+            self._drain_llm_audit(engagement_id, auth.id)
             report.context_blocks = wm.render()
             return report
         finally:
@@ -300,6 +351,7 @@ class Orchestrator:
                                had_signal=verdict.has_signal, finding_confirmed=bool(verdict.finding),
                                error=verdict.failure_reason)
 
+            self._drain_llm_audit(engagement_id, auth.id)
             report.context_blocks = wm.render()
             return report
         finally:
@@ -312,6 +364,8 @@ def build_orchestrator(
     registry_path: str = "authorizations/authorized-targets.json",
     dry_run: bool = True,
     evidence_dir: Optional[str] = None,
+    llm: bool = True,
+    llm_client=None,
 ) -> Orchestrator:
     store = store or MemoryStore(":memory:")
     risk_engine = RiskEngine(project_ceiling=1)
@@ -324,10 +378,25 @@ def build_orchestrator(
         fetch = urllib_fetch
         evidence_dir = evidence_dir or "evidence"
     guard = AuthorizationGuard(AuthorizationRegistry.load(registry_path), risk_engine, fingerprinter=fingerprinter)
+
+    # LLM brains activate only when a client is available (ANTHROPIC_API_KEY set);
+    # otherwise the deterministic reasoners are used. The LLM proposes; code gates.
+    planner = evaluator = learner = None
+    active_client = None
+    if llm:
+        from src.agents.llm import ClaudeClient, ClaudeEvaluator, ClaudeLearner, ClaudePlanner
+        client = llm_client if llm_client is not None else ClaudeClient()
+        if client.available():
+            active_client = client
+            planner = Planner(ClaudePlanner(client, RuleBasedPlanner()))
+            evaluator = Evaluator(ClaudeEvaluator(client, RuleBasedEvaluator()))
+            learner = Learner(ClaudeLearner(client, RuleBasedLearner()))
+
     return Orchestrator(
         store=store, guard=guard, risk_engine=risk_engine,
         skill_registry=SkillRegistry.with_defaults(), scorer=Scorer(store.conn),
         fetch=fetch, evidence_dir=evidence_dir,
+        planner=planner, evaluator=evaluator, learner=learner, llm_client=active_client,
         rate_sleep=(None if not dry_run else (lambda _seconds: None)),  # offline: don't actually sleep
     )
 
@@ -348,6 +417,7 @@ def _print_engagement(r: EngagementReport) -> None:
     print(f"engagement   : {r.engagement_id}")
     print(f"authorization: {r.authorization_id}")
     print(f"identity     : {'VERIFIED' if r.identity_ok else 'UNVERIFIED'}")
+    print(f"brains       : {'Claude (LLM)' if r.llm_active else 'deterministic (set ANTHROPIC_API_KEY for LLM)'}")
     print(f"goal         : {r.goal}")
     print("skills:")
     for o in r.skill_outcomes:
@@ -355,8 +425,9 @@ def _print_engagement(r: EngagementReport) -> None:
         print(f"  - {o['skill_id']}: {status}, signal={o['has_signal']}")
     print(f"findings ({len(r.findings)}):")
     for f in r.findings:
-        print(f"  - [{f['severity']}] {f['title']}")
-        print(f"      skill={f['skill_id']} new={f['new']} evidence_ref={f['evidence_ref']}")
+        tag = f.get("review", f.get("source", "skill"))
+        print(f"  - [{f['severity']}] {f['title']}  ({tag})")
+        print(f"      skill={f['skill_id']} new={f['new']}")
     if r.evidence_dir:
         print(f"evidence     : {r.evidence_dir}/{r.engagement_id}/")
     print("--- working memory (rendered context) ---")
