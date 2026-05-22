@@ -1,0 +1,12 @@
+{
+  "id": "web.missing_security_headers",
+  "purpose": "Identify HTTP responses missing browser security headers that reduce client-side attack resistance.",
+  "when_to_use": "Baseline check on any authorized web application. Cheap and passive (risk 1); run it early in an engagement.",
+  "detection_approach": "Fetch the target and compare response headers against a required-header list (Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security, Referrer-Policy). Report the headers that are absent.",
+  "references": [
+    {"url": "https://owasp.org/www-project-secure-headers/", "title": "OWASP Secure Headers Project", "verified_at": "2026-05-21"},
+    {"url": "https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html", "title": "OWASP HTTP Security Headers Cheat Sheet", "verified_at": "2026-05-21"}
+  ],
+  "tags": ["headers", "http", "browser-security", "misconfiguration"],
+  "status": "active"
+}

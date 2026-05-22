@@ -1,0 +1,13 @@
+{
+  "id": "web.exposed_sensitive_paths",
+  "purpose": "Detect sensitive resources (confidential files, admin/metrics endpoints, key stores) reachable without authentication.",
+  "when_to_use": "After a baseline check, to surface broken access control / sensitive data exposure on an authorized target. Safe-active (risk 2): sends several controlled GETs but changes no state.",
+  "detection_approach": "Request a curated list of sensitive paths (probe list is config in src/skills/web/exposed_sensitive_paths.json) and report those returning 200, matching an expected confidential marker where one is given. Detection is dynamic from live responses, never hardcoded findings.",
+  "references": [
+    {"url": "https://owasp.org/Top10/A01_2021-Broken_Access_Control/", "title": "OWASP Top 10 A01:2021 Broken Access Control", "verified_at": "2026-05-21"},
+    {"url": "https://owasp.org/www-project-web-security-testing-guide/", "title": "OWASP Web Security Testing Guide (WSTG)", "verified_at": "2026-05-21"},
+    {"url": "https://portswigger.net/web-security/access-control", "title": "PortSwigger Web Security Academy: Access Control", "verified_at": "2026-05-21"}
+  ],
+  "tags": ["access-control", "information-disclosure", "recon", "files"],
+  "status": "active"
+}

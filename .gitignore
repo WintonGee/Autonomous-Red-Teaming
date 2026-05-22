@@ -18,3 +18,7 @@ evidence/*
 findings/
 reports/
 logs/
+
+# Unreviewed skill drafts (keep the dir, not its contents)
+skills/_drafts/*
+!skills/_drafts/.gitkeep
