@@ -1,0 +1,6 @@
+# Phase 1 (memory layer) — runtime is Python stdlib only (sqlite3, hashlib).
+pytest>=8
+
+# Phase 2+ — uncomment when building semantic dedup / the AI planning layer:
+# sqlite-vec>=0.1     # vector search for embedding-based near-duplicate detection
+# anthropic>=0.40     # Claude API for the planner, summarizer, and distillation
