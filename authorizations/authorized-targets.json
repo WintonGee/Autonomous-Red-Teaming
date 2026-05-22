@@ -1,0 +1,32 @@
+[
+  {
+    "id": "local-juice-shop",
+    "environment": "learning-lab",
+    "target": "http://localhost:3000",
+    "target_type": "web-application",
+    "owner": "Personal lab",
+    "authorized_by": "Winton Gee",
+    "authorization_source": "owned-local-environment",
+    "allowed_testing": [
+      "reconnaissance",
+      "web-misconfiguration-checks",
+      "safe-validation"
+    ],
+    "disallowed_testing": [
+      "destructive-actions",
+      "credential-access",
+      "persistence",
+      "denial-of-service"
+    ],
+    "rate_limit": {
+      "max_requests_per_second": 2,
+      "max_concurrent_requests": 1
+    },
+    "risk_limit": "low",
+    "valid_from": "2026-05-10",
+    "valid_until": "2026-12-31",
+    "policy_url": null,
+    "last_reviewed": "2026-05-10",
+    "notes": "Local lab target only. Do not test external third-party systems."
+  }
+]
