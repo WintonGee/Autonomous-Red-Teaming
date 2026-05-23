@@ -50,6 +50,40 @@ authorize target (fail closed)
 
 Run `python -m src.measure --live` to score an engagement against ground truth.
 
+## Fully autonomous mode (`run_autonomous`)
+
+Point it at an authorized target and it runs the whole loop itself:
+
+```
+authorize + fingerprint
+  └─ Recon      → SiteProfile  (understanding + plan + coverage gaps)   [LLM or heuristic]
+      └─ try the existing arsenal (trusted skills + prior-generated specs)
+          └─ Skillsmith → new SkillSpecs for the gaps                   [LLM or heuristic]
+              └─ coerce_or_reject (trust boundary) + 5-layer dedupe
+                  └─ run the new specs (gated, risk ≤2) → pending_review findings
+                      └─ persist specs to skills/_generated/ (library grows)
+                          └─ score + distill
+```
+
+**New skills are data, not code.** A generated skill is a declarative `SkillSpec`
+(probes + a closed set of typed detect conditions) executed by the trusted
+`SpecSkill` interpreter — the LLM authors specs, it never runs arbitrary code, and
+`coerce_or_reject` enforces risk ≤2, GET-only, authorized action types, and safe
+paths/patterns. Generated specs persist under `skills/_generated/` and rejoin the
+arsenal next run, so the library genuinely grows; promotion into the trusted
+`skills/` set stays a human decision.
+
+**Dedupe (5 layers):** prompt-level (the generator sees the catalog) → capability
+signature (category+action_type+tags) → structural spec signature (order-
+insensitive, normalized probes+conditions) → within-batch → content-hash at
+persistence. Demonstrated live: run 2 reuses the run-1 generated skill instead of
+recreating it.
+
+```bash
+python -m src.autonomous --live            # understand → try → create → dedupe → score
+python -m src.autonomous --live --use-llm  # LLM recon + LLM skill generation
+```
+
 ## Why it "continuously improves"
 
 `Scorer` writes every run to `skill_runs` in the same SQLite DB. The next
@@ -70,7 +104,11 @@ end to end.
 | `agents/` | Planner, Executor, Evaluator, Learner | Planner/Eval/Learner: Claude when `ANTHROPIC_API_KEY` set, else deterministic |
 | `scoring/` | Per-skill metrics over time | no |
 | `measure.py` | Rediscovery rate vs ground truth; writes trend | no |
+| `agents/recon.py` | Gather + understand a target → SiteProfile | Claude or heuristic |
+| `agents/skillsmith.py` | Generate + dedupe new SkillSpecs | Claude or heuristic |
+| `skills/spec.py` | Declarative spec schema, trust boundary, safe interpreter | no |
 | `memory/distill.py` | Episodic findings → proposed skills (pending review) | no |
+| `autonomous.py` | Point-and-go: understand → try → create → dedupe → score | no |
 | `orchestrator.py` | Sequences the loop, enforces gates | no |
 
 Agent brains are injected via the Protocols in `agents/contracts.py`
@@ -92,7 +130,9 @@ pytest                                       # full suite, no network or API key
 ## Deliberately not built yet
 
 A report writer (findings → human-readable report), embedding/semantic dedup
-(`sqlite-vec`), and the human-approval gate for risk level 3+. (LLM reasoners,
-evidence redaction, the 5-skill library, end-of-engagement distillation, and the
-measurement harness are now built.) The next highest-leverage move is the report
-writer — every finding currently lives as JSON.
+(`sqlite-vec`), LLM-directed crawling (recon currently fetches a fixed safe set,
+not an LLM-chosen frontier), and active testing at risk 3 behind the human-
+approval gate. (LLM reasoners, evidence redaction, the skill library, distillation,
+the measurement harness, and the fully-autonomous generate-and-dedupe loop are
+built.) The next highest-leverage move is the report writer — findings still live
+as JSON.

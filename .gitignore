@@ -23,6 +23,10 @@ logs/
 skills/_drafts/*
 !skills/_drafts/.gitkeep
 
+# Autonomously-generated skill specs (grown at runtime; keep the dir only)
+skills/_generated/*
+!skills/_generated/.gitkeep
+
 # Measurement run artifacts (reproducible; keep the dir + README only)
 measurements/*
 !measurements/.gitkeep

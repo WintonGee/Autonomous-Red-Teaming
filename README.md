@@ -536,15 +536,19 @@ autonomous-red-teaming/
 
 ## Roadmap
 
-Status as of 2026-05-23: Phases 0–5 are built and tested. The learning loop is
-closed end to end — the LLM Learner and a deterministic end-of-engagement
-distiller (`src/memory/distill.py`) both propose human-reviewed skills, a library
-of safe web skills (risk ≤2) ships, and a measurement harness (`python -m src.measure`)
-scores rediscovery against `groundtruth/juice-shop.json`. The system rediscovers
-every ground-truth issue it has a skill for; the ground truth also lists known
-*coverage gaps* (issues with no skill yet) so the rate stays honestly below 100%
-and names the next skill to build. Still open within Phase 5: a report writer and
-embedding/semantic dedup. Phases 6–7 are not started.
+Status as of 2026-05-23: Phases 0–5 are built and tested, and a **fully
+autonomous mode** runs the whole loop point-and-go (`python -m src.autonomous`):
+it understands a target (recon → plan), tries the existing skill arsenal, then
+**creates, dedupes, and runs new skills** for the gaps it finds. New skills are
+declarative specs (data, not code) executed by a trusted interpreter, capped at
+risk ≤2, and persisted so the library grows across runs (promotion to the trusted
+set stays human-reviewed). The LLM drives recon + skill generation when
+`ANTHROPIC_API_KEY` is set; deterministic heuristics run otherwise. A measurement
+harness scores rediscovery against `groundtruth/juice-shop.json`, which also lists
+known *coverage gaps* so the rate stays honest and names the next skill to build —
+the autonomous loop has been shown closing such a gap live. Still open: a report
+writer, embedding/semantic dedup, LLM-directed crawling, and active (risk-3)
+testing. Phases 6–7 are not started.
 
 ### Phase 0: project foundation — done
 
