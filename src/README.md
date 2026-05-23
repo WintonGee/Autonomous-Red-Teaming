@@ -82,7 +82,26 @@ recreating it.
 ```bash
 python -m src.autonomous --live            # understand → try → create → dedupe → score
 python -m src.autonomous --live --use-llm  # LLM recon + LLM skill generation
+# a second, external, vendor-sanctioned target (HCL AppScan's "Altoro Mutual"):
+python -m src.autonomous --live --authorization altoro-mutual --groundtruth groundtruth/none.json
 ```
+
+### Picking a target you're allowed to scan
+
+Authorization is the point, so the registry only holds targets you may test:
+self-hosted vulnerable apps (Juice Shop) and **vendor-published test sites that
+explicitly permit scanning** (`demo.testfire.net`, the `*.vulnweb.com` family).
+A site being reachable or "for hackers" does **not** make it a valid target —
+e.g. hackthissite.org's *challenges* are the sanctioned playground, its
+*infrastructure* is not; it is deliberately absent from the registry.
+
+**Cross-target honesty:** run against AltoroMutual, the generic header-based
+skills (missing-headers, info-disclosure) generalize and find real issues, while
+the Juice-Shop-tuned skills (`exposed_sensitive_paths`, `verbose_errors`) probe
+Juice-Shop paths and correctly find nothing. That gap is by design: probe lists
+are *not* hardcoded to be universal — adapting to a new target is the job of the
+LLM recon (`ClaudeRecon`) and skill generator (`ClaudeSkillGenerator`), which
+author target-appropriate skills per site.
 
 ## Why it "continuously improves"
 

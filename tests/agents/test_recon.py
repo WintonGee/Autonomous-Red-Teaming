@@ -11,6 +11,14 @@ def test_gather_fetches_the_safe_recon_set():
     assert {o["path"] for o in obs} == {"/", "/robots.txt"}
 
 
+def test_understand_surfaces_server_header_tech_generically():
+    # Works on any target, not just Juice Shop: whatever the Server header
+    # advertises shows up as detected tech (AltoroMutual is Apache-Coyote/Tomcat).
+    obs = [{"path": "/", "status": 200, "headers": {"server": "Apache-Coyote/1.1"}, "body_head": ""}]
+    profile = RuleBasedRecon().understand("https://demo.testfire.net", obs)
+    assert any("Apache-Coyote" in t for t in profile.tech)
+
+
 def test_understand_detects_tech_security_notes_and_gap():
     profile = RuleBasedRecon().understand("http://localhost:3001", gather(_http(), "http://localhost:3001"))
     assert "OWASP Juice Shop" in profile.tech

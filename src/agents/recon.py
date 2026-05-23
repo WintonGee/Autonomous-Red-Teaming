@@ -64,10 +64,15 @@ class RuleBasedRecon:
             notable: list[str] = []
 
             if ob["path"] == "/":
-                if "OWASP Juice Shop" in body:
-                    tech.append("OWASP Juice Shop")
+                # Generic: surface whatever the response advertises about its stack.
+                # (Not target-specific — works on any site; the LLM recon adds deeper
+                # inference. Detection skills, not recon, do the vuln-finding.)
+                if headers.get("server"):
+                    tech.append(f"Server: {headers['server']}")
                 if headers.get("x-powered-by"):
                     tech.append(f"X-Powered-By: {headers['x-powered-by']}")
+                if "OWASP Juice Shop" in body:
+                    tech.append("OWASP Juice Shop")
                 if "content-security-policy" not in headers:
                     notable.append("no Content-Security-Policy")
                 if headers.get("access-control-allow-origin") == "*":
