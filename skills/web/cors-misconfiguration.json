@@ -1,0 +1,12 @@
+{
+  "id": "web.cors_misconfiguration",
+  "purpose": "Detect permissive Cross-Origin Resource Sharing (CORS) configuration that may let untrusted origins read responses.",
+  "when_to_use": "Baseline check on any authorized web application or API (risk 1, passive). Run early; pair findings with manual verification of whether the affected endpoint is credentialed.",
+  "detection_approach": "Fetch the target and inspect Access-Control-Allow-Origin. A wildcard (*) is reported as suspected. If Access-Control-Allow-Credentials is also true, escalate to confirmed/high — any origin can then read authenticated responses.",
+  "references": [
+    {"url": "https://owasp.org/www-community/attacks/CORS_OriginHeaderScrutiny", "title": "OWASP: CORS Origin Header Scrutiny", "verified_at": "2026-05-21"},
+    {"url": "https://portswigger.net/web-security/cors", "title": "PortSwigger: Cross-origin resource sharing (CORS)", "verified_at": "2026-05-21"}
+  ],
+  "tags": ["cors", "http", "browser-security", "misconfiguration"],
+  "status": "active"
+}

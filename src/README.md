@@ -6,18 +6,29 @@ charter's safety gates.
 
 ## Honest scope
 
-**This proves the loop's machinery and the safety gates — not yet genuine skill
-generation.** With deterministic agents and one skill, the Learner can only
-*dedup* (reuse before create) and the Planner has one option to prioritize. The
-architecture, gates, memory wiring, and the feedback mechanism are real and
-tested. The *intelligence* arrives when each agent's reasoner is wired to Claude.
+**The loop's machinery, the safety gates, and the LLM brains are all real and
+tested.** When `ANTHROPIC_API_KEY` is set, Claude-backed reasoners drive the
+Planner, Evaluator, and Learner; otherwise deterministic rule-based reasoners run
+— and those same rule-based reasoners are the fallback whenever an LLM call
+errors. Either way the LLM only *proposes*: the Guard and RiskEngine gate every
+action in code, and LLM-discovered findings are persisted as `pending_review`,
+never auto-trusted.
 
-**Immediate next milestone: wire the Learner to Claude** — it is the one agent
-that needs an LLM to do anything beyond dedup (generalize new detection patterns
-from confirmed findings and failures). Planner and Evaluator can stay
-deterministic longer. Use the `claude-api` skill for SDK + prompt-caching
-mechanics; implement `LearnerReasoner` against the Anthropic SDK and pass it to
-`Learner(reasoner=...)`. No other file changes.
+**The self-improvement loop is now closed and measured.** Five safe web skills
+ship (risk ≤2). End-of-engagement distillation (`memory/distill.py`) reads the
+episodic finding log and proposes a reusable, human-reviewed skill for any
+finding-category with no covering skill — so an issue the LLM Evaluator surfaces
+in a category we lack becomes a skill the next run rediscovers deterministically.
+A measurement harness (`src.measure`) scores each run against a ground-truth list
+(`groundtruth/juice-shop.json`) and appends to `measurements/trend.tsv`, so
+improvement over time is a number, not a claim. Current baseline: **100%
+rediscovery (5/5) live against the Juice Shop lab.**
+
+The honest caveat: with five skills the deterministic distiller no-ops (every
+finding is already covered) — its value shows only once the LLM Evaluator
+surfaces an *uncovered-category* finding. The "L" in this learning loop is still
+the LLM. Remaining depth work: a report writer, embedding/semantic dedup, and the
+human-approval gate for risk 3+.
 
 ## The cycle
 
@@ -28,10 +39,13 @@ authorize target (fail closed)
           └─ Guard + RiskEngine        (fail closed; deterministic code)
               └─ Executor → ExecutionResult (scoped HttpClient; tool-layer scope check too)
                   └─ Evaluator → Verdict     (signal? finding? failure reason?)
-                      └─ persist finding (deduped, authorization-scoped)
+                      └─ persist finding (deduped, authorization-scoped; logged to episodic)
                           └─ Learner → SkillProposals (reuse before create)
                               └─ Scorer.record  (persists → shapes next cycle)
+                                  └─ distill_engagement → skill proposals (pending_review)
 ```
+
+Run `python -m src.measure --live` to score an engagement against ground truth.
 
 ## Why it "continuously improves"
 
@@ -50,8 +64,10 @@ end to end.
 | `risk/` | Risk levels + ceiling enforcement | no |
 | `tools/` | Gated HTTP client (refuses unauthorized URLs itself) | no |
 | `skills/` | Detection logic (pure; no I/O) | no |
-| `agents/` | Planner, Executor, Evaluator, Learner | Planner/Eval/Learner: swappable |
+| `agents/` | Planner, Executor, Evaluator, Learner | Planner/Eval/Learner: Claude when `ANTHROPIC_API_KEY` set, else deterministic |
 | `scoring/` | Per-skill metrics over time | no |
+| `measure.py` | Rediscovery rate vs ground truth; writes trend | no |
+| `memory/distill.py` | Episodic findings → proposed skills (pending review) | no |
 | `orchestrator.py` | Sequences the loop, enforces gates | no |
 
 Agent brains are injected via the Protocols in `agents/contracts.py`
@@ -61,14 +77,19 @@ deterministic; an LLM reasoner is a drop-in.
 ## Run it
 
 ```bash
-python -m src.orchestrator --authorization local-juice-shop --goal missing-headers
+python -m src.orchestrator --authorization local-juice-shop --goal assess
 python -m src.orchestrator --cycles 2      # watch metrics accumulate across cycles
-python -m src.orchestrator --live          # real requests (needs Juice Shop on :3000)
-pytest                                       # full suite, no network required
+python -m src.orchestrator --live          # real requests (needs Juice Shop on :3001)
+python -m src.measure                      # offline rediscovery vs ground truth
+python -m src.measure --live               # measure against the live lab
+export ANTHROPIC_API_KEY=...               # activates the Claude reasoners (else deterministic)
+pytest                                       # full suite, no network or API key required
 ```
 
 ## Deliberately not built yet
 
-LLM reasoners, embedding/semantic dedup (`sqlite-vec`), multi-skill discovery,
-report writer, evidence redaction. The thin slice's job is to close the loop
-safely, not to be feature-complete.
+A report writer (findings → human-readable report), embedding/semantic dedup
+(`sqlite-vec`), and the human-approval gate for risk level 3+. (LLM reasoners,
+evidence redaction, the 5-skill library, end-of-engagement distillation, and the
+measurement harness are now built.) The next highest-leverage move is the report
+writer — every finding currently lives as JSON.

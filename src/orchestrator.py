@@ -41,6 +41,7 @@ from src.authorization import (
     StaticFingerprinter,
 )
 from src.memory.dedup import content_hash
+from src.memory.distill import distill_engagement
 from src.memory.gc import run_gc
 from src.memory.session import start_engagement
 from src.memory.store import MemoryStore
@@ -74,6 +75,7 @@ class EngagementReport:
     skill_outcomes: list = field(default_factory=list)
     evidence_dir: Optional[str] = None
     context_blocks: list = field(default_factory=list)
+    distilled: list = field(default_factory=list)  # skills proposed by end-of-engagement distillation
 
 
 class Orchestrator:
@@ -165,6 +167,15 @@ class Orchestrator:
         )
         return True, evidence_ref
 
+    def _log_finding_event(self, engagement_id: str, auth_id: str, finding: dict) -> None:
+        """Persist a structured finding into the episodic log so end-of-engagement
+        distillation has material to reason over."""
+        self.store.add_event(
+            engagement_id=engagement_id, authorization_id=auth_id,
+            event_type="finding", content=json.dumps(finding, sort_keys=True),
+            salience="salient",
+        )
+
     def _persist_extra_finding(self, auth_id: str, finding: dict) -> bool:
         """Persist an LLM-discovered finding as pending_review (deduped). Returns is_new."""
         fh = content_hash(json.dumps(finding, sort_keys=True))
@@ -241,6 +252,7 @@ class Orchestrator:
                         "severity": verdict.finding.get("severity"), "new": is_new,
                         "evidence_ref": evidence_ref, "source": "skill", "finding": verdict.finding,
                     })
+                    self._log_finding_event(engagement_id, auth.id, verdict.finding)
 
                 # LLM-discovered findings are persisted as pending_review, never auto-trusted.
                 for extra in verdict.extra_findings:
@@ -251,6 +263,7 @@ class Orchestrator:
                         "source": extra.get("source", "llm-evaluator"),
                         "review": "pending_review", "finding": extra,
                     })
+                    self._log_finding_event(engagement_id, auth.id, extra)
 
                 self.scorer.record(skill_id=info.skill_id, authorization_id=auth.id,
                                    had_signal=verdict.has_signal, finding_confirmed=bool(verdict.finding),
@@ -261,8 +274,19 @@ class Orchestrator:
             for proposal in self.learner.learn(verdicts, infos):
                 self.store.add_semantic_item(
                     kind="skill", title=proposal.title, content=proposal.payload,
-                    tags=[proposal.category], source="distilled", status="pending_review",
+                    tags=[proposal.category], source="llm-learner", status="pending_review",
                 )
+
+            # Distill the episodic record into reusable skill proposals for any
+            # finding-category still uncovered (deduped against all known skills,
+            # including the Learner's just-added proposals). Human review required.
+            for prop in distill_engagement(self.store, engagement_id):
+                self.store.add_semantic_item(
+                    kind="skill", title=prop["title"], content=prop["payload"],
+                    tags=[prop["category"]], source=prop["source"], status="pending_review",
+                )
+                report.distilled.append({"title": prop["title"], "category": prop["category"]})
+
             self._drain_llm_audit(engagement_id, auth.id)
             report.context_blocks = wm.render()
             return report

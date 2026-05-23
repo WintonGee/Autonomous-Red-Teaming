@@ -1,0 +1,9 @@
+[
+  {"header": "x-powered-by", "why": "Reveals the application framework/runtime, aiding targeted attacks"},
+  {"header": "server", "why": "Reveals server software and version", "version_only": true},
+  {"header": "x-aspnet-version", "why": "Reveals the ASP.NET framework version"},
+  {"header": "x-aspnetmvc-version", "why": "Reveals the ASP.NET MVC version"},
+  {"header": "x-recruiting", "why": "Custom header leaking an internal application path"},
+  {"header": "via", "why": "Reveals intermediate proxy/cache infrastructure"},
+  {"header": "x-backend-server", "why": "Reveals an internal backend hostname"}
+]

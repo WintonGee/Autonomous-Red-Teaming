@@ -1,0 +1,11 @@
+{
+  "target": "local-juice-shop",
+  "description": "Known issues in OWASP Juice Shop reachable by risk<=2 skills. Verified against the live :3001 lab on 2026-05-21. Each maps to the skill expected to rediscover it.",
+  "issues": [
+    {"id": "js-missing-headers", "title": "Missing security headers (CSP, HSTS, Referrer-Policy)", "category": "web-misconfiguration", "detected_by": "web.missing_security_headers"},
+    {"id": "js-exposed-paths", "title": "Sensitive paths reachable unauthenticated (/ftp, /metrics, /encryptionkeys, version)", "category": "broken-access-control", "detected_by": "web.exposed_sensitive_paths"},
+    {"id": "js-cors-wildcard", "title": "Permissive wildcard CORS (Access-Control-Allow-Origin: *)", "category": "cors-misconfiguration", "detected_by": "web.cors_misconfiguration"},
+    {"id": "js-info-headers", "title": "Information-disclosure headers (X-Recruiting)", "category": "information-disclosure", "detected_by": "web.info_disclosure_headers"},
+    {"id": "js-verbose-errors", "title": "Verbose error disclosure on error endpoints", "category": "error-handling", "detected_by": "web.verbose_errors"}
+  ]
+}

@@ -22,3 +22,8 @@ logs/
 # Unreviewed skill drafts (keep the dir, not its contents)
 skills/_drafts/*
 !skills/_drafts/.gitkeep
+
+# Measurement run artifacts (reproducible; keep the dir + README only)
+measurements/*
+!measurements/.gitkeep
+!measurements/README.md
