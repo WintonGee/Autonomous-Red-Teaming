@@ -21,8 +21,11 @@ finding-category with no covering skill — so an issue the LLM Evaluator surfac
 in a category we lack becomes a skill the next run rediscovers deterministically.
 A measurement harness (`src.measure`) scores each run against a ground-truth list
 (`groundtruth/juice-shop.json`) and appends to `measurements/trend.tsv`, so
-improvement over time is a number, not a claim. Current baseline: **100%
-rediscovery (5/5) live against the Juice Shop lab.**
+improvement over time is a number, not a claim. The system rediscovers every
+ground-truth issue it has a skill for; ground truth also lists known *coverage
+gaps* (issues with no skill yet, e.g. `js-robots-disclosure`) so the rate stays
+honestly below 100% and names the next skill to build — the metric tracks real
+capability, not a checklist scoring itself.
 
 The honest caveat: with five skills the deterministic distiller no-ops (every
 finding is already covered) — its value shows only once the LLM Evaluator

@@ -539,10 +539,12 @@ autonomous-red-teaming/
 Status as of 2026-05-23: Phases 0–5 are built and tested. The learning loop is
 closed end to end — the LLM Learner and a deterministic end-of-engagement
 distiller (`src/memory/distill.py`) both propose human-reviewed skills, five safe
-web skills ship, and a measurement harness (`python -m src.measure`) scores
-rediscovery against `groundtruth/juice-shop.json` (currently 100%, 5/5, live).
-Still open within Phase 5: a report writer and embedding/semantic dedup. Phases
-6–7 are not started.
+web skills (risk ≤2) ship, and a measurement harness (`python -m src.measure`)
+scores rediscovery against `groundtruth/juice-shop.json`. The system rediscovers
+every ground-truth issue it has a skill for; the ground truth also lists known
+*coverage gaps* (issues with no skill yet) so the rate stays honestly below 100%
+and names the next skill to build. Still open within Phase 5: a report writer and
+embedding/semantic dedup. Phases 6–7 are not started.
 
 ### Phase 0: project foundation — done
 

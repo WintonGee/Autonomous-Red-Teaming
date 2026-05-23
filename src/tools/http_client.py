@@ -124,18 +124,21 @@ _FAKE_ROOT_HEADERS = {
 }
 
 _FAKE_ROUTES: dict[str, HttpResponse] = {
+    # Real exposed files carry a content marker the SPA shell would never contain.
+    # /ftp and /encryptionkeys are deliberately NOT modelled: like the live target,
+    # they return the SPA index fallback (default branch below), so the marker-
+    # requiring skill correctly does not report them.
     "/ftp/acquisitions.md": HttpResponse(
         200, {"content-type": "text/markdown"}, "",
-        body="# Acquisitions\nThis document is strictly confidential.\n"),
-    "/ftp/legal.md": HttpResponse(200, {"content-type": "text/markdown"}, "", body="# Legal\n"),
-    "/ftp": HttpResponse(200, {"content-type": "text/html"}, "",
-                         body="<title>listing directory /ftp</title>"),
+        body="# Planned Acquisitions\nThis document is strictly confidential.\n"),
+    "/ftp/legal.md": HttpResponse(200, {"content-type": "text/markdown"}, "",
+                                  body="# Legal Information\nLorem ipsum.\n"),
     "/metrics": HttpResponse(200, {"content-type": "text/plain"}, "",
                              body="# HELP process_cpu_seconds_total ...\nprocess_cpu_seconds_total 1.0\n"),
-    "/encryptionkeys": HttpResponse(200, {"content-type": "text/html"}, "",
-                                    body="<title>listing directory /encryptionkeys</title>"),
     "/rest/admin/application-version": HttpResponse(
         200, {"content-type": "application/json"}, "", body='{"version":"20.0.0"}'),
+    "/robots.txt": HttpResponse(200, {"content-type": "text/plain"}, "",
+                                body="User-agent: *\nDisallow: /ftp\n"),
     # A request that triggers a verbose framework error page (stack-trace style).
     "/api/Feedbacks/99999": HttpResponse(
         401, {"content-type": "text/html"}, "",

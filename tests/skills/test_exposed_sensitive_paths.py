@@ -22,15 +22,24 @@ def _client():
 def test_detects_only_actually_exposed_paths():
     probes = [
         {"path": "/ftp/acquisitions.md", "why": "confidential doc", "expect_contains": "confidential"},
-        {"path": "/ftp", "why": "browsable folder"},
-        {"path": "/metrics", "why": "metrics exposed"},
-        {"path": "/does-not-exist", "why": "should 404"},
+        {"path": "/ftp", "why": "browsable folder", "expect_contains": "Index of"},
+        {"path": "/metrics", "why": "metrics exposed", "expect_contains": "# HELP"},
+        {"path": "/does-not-exist", "why": "should 404", "expect_contains": "x"},
     ]
     obs = ExposedSensitivePaths(probes=probes).run(_client(), "http://localhost:3001")
     exposed_paths = {e["path"] for e in obs["exposed"]}
     assert exposed_paths == {"/ftp/acquisitions.md", "/ftp", "/metrics"}
     assert obs["finding"]["category"] == "broken-access-control"
     assert obs["finding"]["evidence"]["exposed"]
+
+
+def test_bare_200_without_marker_is_not_reported():
+    # Evidence over claims: an SPA returns 200 for unknown paths; a probe with no
+    # content marker must NOT be reported as exposed (regression for SPA fallback).
+    probes = [{"path": "/metrics", "why": "no marker given"}]
+    obs = ExposedSensitivePaths(probes=probes).run(_client(), "http://localhost:3001")
+    assert obs["exposed"] == []
+    assert "finding" not in obs
 
 
 def test_content_marker_must_match():

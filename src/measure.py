@@ -110,7 +110,9 @@ def _print(card: dict) -> None:
     rate_pct = card["rediscovery_rate"] * 100
     print(f"REDISCOVERY   : {rate_pct:.0f}%  ({len(card['found'])}/{len(card['found']) + len(card['missed'])} known issues)")
     if card["missed"]:
-        print(f"  missed      : {', '.join(card['missed'])}")
+        print(f"  missed      : {', '.join(card['missed'])}  <- coverage gaps to close next")
+    print("  note        : rediscovery measures known issues found, not unknown ones; "
+          "it is only as good as groundtruth/*.json")
     print("per-skill:")
     for s in card["per_skill"]:
         flag = "signal" if s["has_signal"] else ("ran" if s["ran"] else "blocked")

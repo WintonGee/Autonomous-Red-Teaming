@@ -99,7 +99,11 @@ def test_loop_closes_novel_finding_becomes_reviewable_skill_proposal():
     report = orch.run_engagement("local-juice-shop", "assess")
     assert any(d["category"] == "open-redirect" for d in report.distilled)
 
+    # Discriminating: only distillation writes a kind='skill' with source='distilled'
+    # (the extra-finding path writes kind='finding'); so this row proves the loop closed.
     proposed = store.conn.execute(
-        "SELECT status FROM semantic_items WHERE kind='skill' AND tags LIKE '%open-redirect%'"
+        "SELECT status, source FROM semantic_items "
+        "WHERE kind='skill' AND source='distilled' AND tags LIKE '%open-redirect%'"
     ).fetchone()
+    assert proposed is not None
     assert proposed["status"] == "pending_review"

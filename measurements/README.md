@@ -16,3 +16,13 @@ python -m src.measure --live     # against the live lab on :3001
 `rediscovery_rate` = fraction of the ground-truth issues in
 `groundtruth/juice-shop.json` that the engagement actually found. Baselines run
 with the LLM evaluator OFF for comparability; add `--use-llm` to opt in.
+
+## What this number does and does not mean
+
+Rediscovery measures *known* issues found — it is only as honest as the
+ground-truth file. To stop it from "reading its own answer key," ground truth
+deliberately includes **coverage gaps**: issues whose `detected_by` skill does
+not exist yet (e.g. `js-robots-disclosure`). They hold the rate below 100% and
+name the next skill to build — so a rising rate reflects real new capability, not
+a fixed checklist scoring itself. It says nothing about *unknown* vulnerabilities;
+that is what the LLM Evaluator + distillation loop is for.

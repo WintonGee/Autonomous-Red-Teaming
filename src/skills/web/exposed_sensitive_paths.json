@@ -1,8 +1,8 @@
 [
   {"path": "/ftp/acquisitions.md", "why": "Confidential acquisitions document readable without authentication", "expect_contains": "confidential"},
-  {"path": "/ftp/legal.md", "why": "Internal document exposed via the open FTP folder"},
-  {"path": "/ftp", "why": "FTP folder is browsable (directory exposure)"},
-  {"path": "/metrics", "why": "Prometheus metrics endpoint exposed (information disclosure)"},
-  {"path": "/encryptionkeys", "why": "Encryption keys directory is browsable"},
-  {"path": "/rest/admin/application-version", "why": "Internal application version disclosed"}
+  {"path": "/ftp/legal.md", "why": "Internal legal document exposed via the open FTP folder", "expect_contains": "Legal Information"},
+  {"path": "/ftp", "why": "FTP folder is browsable (directory listing exposure)", "expect_contains": "Directory listing"},
+  {"path": "/metrics", "why": "Prometheus metrics endpoint exposed (information disclosure)", "expect_contains": "# HELP"},
+  {"path": "/encryptionkeys", "why": "Encryption keys directory is browsable", "expect_contains": "Directory listing"},
+  {"path": "/rest/admin/application-version", "why": "Internal application version disclosed", "expect_contains": "version"}
 ]

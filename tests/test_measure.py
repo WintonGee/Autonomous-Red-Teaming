@@ -7,30 +7,36 @@ from src.orchestrator import build_orchestrator
 GROUNDTRUTH = "groundtruth/juice-shop.json"
 
 
-def test_offline_rediscovers_all_known_issues():
-    # The faithful offline fixture models every ground-truth issue, so a correct
-    # system + correct skills must rediscover 100% deterministically.
+def test_offline_finds_every_covered_issue_and_flags_the_gap():
+    # Every ground-truth issue that has a built skill must be rediscovered; the
+    # intentional coverage gap (an issue whose detector does not exist yet) must be
+    # reported as missed, keeping the rate honestly below 100%.
     groundtruth = json.loads(Path(GROUNDTRUTH).read_text())
     orch = build_orchestrator(dry_run=True, llm=False)
     report = orch.run_engagement("local-juice-shop", "assess")
     card = build_scorecard(report, groundtruth, orch.scorer, "offline")
 
-    assert card["rediscovery_rate"] == 1.0
-    assert card["missed"] == []
-    assert card["n_findings"] == len(groundtruth["issues"])
+    assert "js-robots-disclosure" in card["missed"]   # the deliberate gap
+    covered = {i["id"] for i in groundtruth["issues"] if i["id"] != "js-robots-disclosure"}
+    assert set(card["found"]) == covered
+    assert 0 < card["rediscovery_rate"] < 1.0
 
 
 def test_missing_skill_lowers_rediscovery():
-    # Removing a skill must show up as a lower rediscovery rate — proving the
-    # metric actually tracks capability, not just "ran without error".
+    # Removing a skill must lower the rediscovery rate — proving the metric tracks
+    # capability, not just "ran without error".
     groundtruth = json.loads(Path(GROUNDTRUTH).read_text())
-    orch = build_orchestrator(dry_run=True, llm=False)
-    orch.skills._skills.pop("web.cors_misconfiguration")
-    report = orch.run_engagement("local-juice-shop", "assess")
-    card = build_scorecard(report, groundtruth, orch.scorer, "offline")
+    full = build_orchestrator(dry_run=True, llm=False)
+    full_card = build_scorecard(
+        full.run_engagement("local-juice-shop", "assess"), groundtruth, full.scorer, "offline")
 
-    assert card["rediscovery_rate"] < 1.0
-    assert "js-cors-wildcard" in card["missed"]
+    reduced = build_orchestrator(dry_run=True, llm=False)
+    reduced.skills._skills.pop("web.cors_misconfiguration")
+    reduced_card = build_scorecard(
+        reduced.run_engagement("local-juice-shop", "assess"), groundtruth, reduced.scorer, "offline")
+
+    assert reduced_card["rediscovery_rate"] < full_card["rediscovery_rate"]
+    assert "js-cors-wildcard" in reduced_card["missed"]
 
 
 def test_run_measurement_writes_scorecard(tmp_path):
