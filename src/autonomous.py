@@ -31,6 +31,14 @@ def _print(report, scorecard: Optional[dict], live: bool) -> None:
         print(f"tech          : {', '.join(report.tech)}")
     if report.planned_gaps:
         print(f"gaps found    : {', '.join(g.get('category', '?') for g in report.planned_gaps)}")
+    if report.surface:
+        s = report.surface
+        params = s.get("params", [])
+        print(f"surface       : {s.get('pages', 0)} pages, {s.get('forms', 0)} forms, "
+              f"{s.get('endpoints', 0)} endpoints, {len(params)} parameters"
+              + (f" ({', '.join(params[:8])}{'…' if len(params) > 8 else ''})" if params else ""))
+        for note in s.get("notes", []):
+            print(f"                ! {note}")
 
     print(f"\nexisting arsenal ({len(report.skill_outcomes)} skills tried):")
     for o in report.skill_outcomes:

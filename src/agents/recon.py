@@ -29,6 +29,7 @@ class SiteProfile:
     observations: list[dict] = field(default_factory=list)   # [{path, status, notable[]}]
     gaps: list[dict] = field(default_factory=list)            # [{category, hint, path}]
     notes: list[str] = field(default_factory=list)
+    surface: dict = field(default_factory=dict)              # discovered attack surface (crawl)
 
 
 def gather(http: "HttpClient", target_url: str) -> list[dict]:

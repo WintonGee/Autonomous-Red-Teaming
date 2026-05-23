@@ -42,6 +42,11 @@ def test_autonomous_understands_runs_and_creates_a_new_skill(tmp_path):
     created = [g for g in report.generated_skills if g["category"] == "crawler-policy-disclosure"]
     assert created and created[0]["ran"] and created[0]["has_signal"]
 
+    # 3b. It mapped an attack surface (discovery crawl ran).
+    assert report.surface
+    assert report.surface["pages"] >= 1
+    assert "endpoints" in report.surface
+
     # 4. The generated skill was persisted (library grew) and is pending_review.
     assert list(Path(tmp_path).glob("*.json"))
     proposed = orch.store.conn.execute(

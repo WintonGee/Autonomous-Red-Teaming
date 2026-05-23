@@ -57,6 +57,7 @@ Point it at an authorized target and it runs the whole loop itself:
 ```
 authorize + fingerprint
   └─ Recon      → SiteProfile  (understanding + plan + coverage gaps)   [LLM or heuristic]
+      └─ Discover → attack surface (bounded GET-only crawl: pages/forms/params) [crawl.py]
       └─ try the existing arsenal (trusted skills + prior-generated specs)
           └─ Skillsmith → new SkillSpecs for the gaps                   [LLM or heuristic]
               └─ coerce_or_reject (trust boundary) + 5-layer dedupe
@@ -124,6 +125,7 @@ end to end.
 | `scoring/` | Per-skill metrics over time | no |
 | `measure.py` | Rediscovery rate vs ground truth; writes trend | no |
 | `agents/recon.py` | Gather + understand a target → SiteProfile | Claude or heuristic |
+| `agents/crawl.py` | Bounded GET-only attack-surface discovery (pages/forms/params) | no |
 | `agents/skillsmith.py` | Generate + dedupe new SkillSpecs | Claude or heuristic |
 | `skills/spec.py` | Declarative spec schema, trust boundary, safe interpreter | no |
 | `memory/distill.py` | Episodic findings → proposed skills (pending review) | no |
@@ -148,10 +150,12 @@ pytest                                       # full suite, no network or API key
 
 ## Deliberately not built yet
 
-A report writer (findings → human-readable report), embedding/semantic dedup
-(`sqlite-vec`), LLM-directed crawling (recon currently fetches a fixed safe set,
-not an LLM-chosen frontier), and active testing at risk 3 behind the human-
-approval gate. (LLM reasoners, evidence redaction, the skill library, distillation,
-the measurement harness, and the fully-autonomous generate-and-dedupe loop are
-built.) The next highest-leverage move is the report writer — findings still live
-as JSON.
+The next blockers toward finding high-severity (not just misconfiguration) bugs:
+**active testing at risk 3** (differential probes for injection/XSS/IDOR) behind a
+**human-approval gate** (neither exists yet — risk is capped at 2 by design);
+**auth/session handling** (only anonymous requests today); and a **report writer**
+(findings are still JSON). Discovery is static-HTML only — a JS-rendered SPA needs
+a headless browser to enumerate client-side routes. Also unbuilt: embedding/
+semantic memory dedup (`sqlite-vec`). (Built: LLM reasoners, evidence redaction,
+the skill library, distillation, measurement harness, the autonomous
+generate-and-dedupe loop, and bounded attack-surface discovery.)

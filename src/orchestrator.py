@@ -32,6 +32,7 @@ from src.agents import (
     SkillInfo,
     Verdict,
 )
+from src.agents.crawl import discover as crawl_discover
 from src.agents.reasoners import RuleBasedEvaluator, RuleBasedLearner, RuleBasedPlanner
 from src.agents.recon import RuleBasedRecon, gather as recon_gather
 from src.agents.skillsmith import (
@@ -96,6 +97,7 @@ class AutonomousReport:
     profile_summary: str = ""
     tech: list = field(default_factory=list)
     planned_gaps: list = field(default_factory=list)
+    surface: dict = field(default_factory=dict)           # discovered attack surface (crawl)
     skill_outcomes: list = field(default_factory=list)    # existing arsenal (trusted + prior-generated)
     generated_skills: list = field(default_factory=list)  # skills created this run
     generation_audit: dict = field(default_factory=dict)  # proposed/rejected/duplicate/created counts
@@ -137,6 +139,7 @@ class Orchestrator:
         self.skill_generator = skill_generator or RuleBasedSkillGenerator()
         self.spec_deduper = spec_deduper  # optional semantic dedupe (LLM); None = skip
         self.generated_dir = generated_dir  # None -> skills/_generated (the live library)
+        self.crawl_pages = 25  # max pages the discovery crawler will fetch per engagement
         self.evidence_dir = evidence_dir
         self.llm_client = llm_client  # set when LLM brains are active; None otherwise
         # Rate-limiter sleep: real for live runs, no-op offline (nothing to be polite to).
@@ -303,15 +306,22 @@ class Orchestrator:
             http = HttpClient(allowed_urls={auth.target}, fetch=self.fetch, rate_limiter=rate)
             executor = Executor(http, self.skills)
 
-            # 1. Recon → understanding + plan.
+            # 1. Recon → understanding + attack-surface discovery (crawl).
             observations = recon_gather(http, auth.target)
             profile = self.recon.understand(auth.target, observations)
+            crawl = crawl_discover(http, auth.target, max_pages=self.crawl_pages)
+            # summary() carries the counts; detail lists are kept under distinct keys
+            # so the next phase has them without clobbering the counts.
+            profile.surface = {**crawl.summary(), "endpoint_detail": crawl.endpoints,
+                               "form_detail": crawl.forms, "notes": crawl.notes}
             report.profile_summary = profile.summary
             report.tech = list(profile.tech)
             report.planned_gaps = list(profile.gaps)
+            report.surface = profile.surface
             wm.add(f"recon: {profile.summary}", salience="salient")
-            self.store.add_event(engagement_id=engagement_id, authorization_id=auth.id,
-                                 event_type="recon", content=profile.summary, salience="salient")
+            self.store.add_event(
+                engagement_id=engagement_id, authorization_id=auth.id, event_type="recon",
+                content=f"{profile.summary} | surface: {crawl.summary()}", salience="salient")
 
             # Pull previously-generated skills into the arsenal (the library has grown).
             for spec in load_generated_specs(self.generated_dir):
