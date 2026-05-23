@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from src.skills.dedup import dedupe_specs
 from src.skills.spec import SkillSpec, coerce_or_reject
@@ -59,12 +59,24 @@ def generate_skills(
     allowed_testing: set[str],
     existing_specs: list[SkillSpec] = (),
     existing_cards: list[dict] = (),
+    audit: Optional[dict] = None,
 ) -> list[SkillSpec]:
-    """Reasoner proposals -> validated, deduped, runnable SkillSpecs."""
+    """Reasoner proposals -> validated, deduped, runnable SkillSpecs.
+
+    If `audit` is given, it is populated with how many proposals were rejected by
+    the trust boundary vs. dropped as duplicates — so silent drops are visible
+    (a self-improving system wants to know when its generator produces junk)."""
     raw = reasoner.propose(profile, list(existing_cards))
-    coerced = [coerce_or_reject(p, allowed_testing=allowed_testing) for p in raw]
-    coerced = [s for s in coerced if s is not None]
-    return dedupe_specs(coerced, existing_specs=existing_specs, existing_skill_cards=existing_cards)
+    valid = [s for s in (coerce_or_reject(p, allowed_testing=allowed_testing) for p in raw) if s is not None]
+    unique = dedupe_specs(valid, existing_specs=existing_specs, existing_skill_cards=existing_cards)
+    if audit is not None:
+        audit.update({
+            "proposed": len(raw),
+            "rejected_unsafe": len(raw) - len(valid),
+            "dropped_duplicate": len(valid) - len(unique),
+            "created": len(unique),
+        })
+    return unique
 
 
 def save_generated_spec(spec: SkillSpec, directory=None) -> Path:

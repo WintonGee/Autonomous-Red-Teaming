@@ -58,9 +58,6 @@ from src.skills.registry import SkillRegistry
 from src.skills.spec import SpecSkill
 from src.tools.http_client import Fetch, HttpClient, RateLimiter, fake_juice_shop_fetch, urllib_fetch
 
-# Findings from generated skills are heuristic/LLM-authored — never auto-trusted.
-_GENERATED_SOURCES = {"heuristic-generated", "llm-generated"}
-
 
 @dataclass
 class CycleReport:
@@ -101,6 +98,7 @@ class AutonomousReport:
     planned_gaps: list = field(default_factory=list)
     skill_outcomes: list = field(default_factory=list)    # existing arsenal (trusted + prior-generated)
     generated_skills: list = field(default_factory=list)  # skills created this run
+    generation_audit: dict = field(default_factory=dict)  # proposed/rejected/duplicate/created counts
     findings: list = field(default_factory=list)
     evidence_dir: Optional[str] = None
     context_blocks: list = field(default_factory=list)
@@ -255,13 +253,16 @@ class Orchestrator:
                              salience="salient")
 
         if verdict.finding:
-            source = verdict.finding.get("source")
-            if source in _GENERATED_SOURCES:
+            # Trust decision is made on the SKILL TYPE, never on a string the LLM
+            # authored: a generated skill (SpecSkill) is always pending_review, so a
+            # proposal cannot mark itself trusted by setting its own `source`.
+            if isinstance(self.skills.get(skill_id), SpecSkill):
                 is_new = self._persist_extra_finding(auth.id, verdict.finding)
                 findings_out.append({
                     "skill_id": skill_id, "title": verdict.finding["title"],
                     "severity": verdict.finding.get("severity"), "new": is_new,
-                    "source": source, "review": "pending_review", "finding": verdict.finding,
+                    "source": verdict.finding.get("source", "generated"),
+                    "review": "pending_review", "finding": verdict.finding,
                 })
             else:
                 is_new, evidence_ref = self._persist_finding(engagement_id, auth.id, skill_id, verdict.finding)
@@ -328,8 +329,10 @@ class Orchestrator:
             # 3. Create new skills for the gaps recon found (validated + deduped).
             existing_cards = [s.to_record() for s in self.skills.all()]
             existing_specs = [s.spec for s in self.skills.all() if isinstance(s, SpecSkill)]
+            audit: dict = {}
             new_specs = generate_skills(self.skill_generator, profile, allowed_testing=allowed,
-                                        existing_specs=existing_specs, existing_cards=existing_cards)
+                                        existing_specs=existing_specs, existing_cards=existing_cards, audit=audit)
+            report.generation_audit = audit
             for spec in new_specs:
                 entry = {"skill_id": spec.id, "category": spec.category, "source": spec.source,
                          "ran": False, "has_signal": False, "blocked_reason": None}

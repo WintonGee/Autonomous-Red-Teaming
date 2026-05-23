@@ -37,6 +37,11 @@ def _print(report, scorecard: Optional[dict]) -> None:
         status = "signal" if o["has_signal"] else ("ran" if o["ran"] else f"BLOCKED ({o['blocked_reason']})")
         print(f"  - {o['skill_id']:<34} {status}")
 
+    if report.generation_audit:
+        a = report.generation_audit
+        print(f"\ngeneration    : proposed {a.get('proposed', 0)}, "
+              f"rejected-unsafe {a.get('rejected_unsafe', 0)}, "
+              f"dropped-duplicate {a.get('dropped_duplicate', 0)}, created {a.get('created', 0)}")
     print(f"\nskills CREATED this run ({len(report.generated_skills)}):")
     for g in report.generated_skills:
         status = "signal" if g["has_signal"] else ("ran" if g["ran"] else f"BLOCKED ({g['blocked_reason']})")
