@@ -383,6 +383,52 @@ class ClaudeSkillGenerator:
         return proposals
 
 
+class ClaudeSpecDeduper:
+    """Semantic dedupe layer: flags generated specs that are functionally redundant
+    with an existing skill even when categorized differently (which the structural
+    layers miss). Returns indices to drop; on unavailable/error it drops nothing
+    (fail open — the human review gate remains the backstop)."""
+
+    def __init__(self, client: ClaudeClient) -> None:
+        self.client = client
+
+    def redundant(self, candidates, existing_cards: list[dict]) -> list[int]:
+        if not self.client.available() or not candidates:
+            return []
+        cand_summ = [{
+            "index": i, "category": c.category, "title": c.title, "action_type": c.action_type,
+            "probes": [p["path"] for p in c.probes],
+            "checks": [cond.get("check") for cond in c.detect.get("conditions", [])],
+        } for i, c in enumerate(candidates)]
+        existing_summ = [{"id": c.get("id"), "name": c.get("name"), "category": c.get("category")}
+                         for c in existing_cards]
+        tool = {
+            "name": "flag_redundant",
+            "description": "Flag candidate skills that duplicate an existing skill's purpose.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"duplicate_indices": {"type": "array", "items": {"type": "integer"}}},
+                "required": ["duplicate_indices"], "additionalProperties": False,
+            },
+        }
+        user = (
+            f"Existing skills:\n{json.dumps(existing_summ, indent=2)}\n"
+            f"Candidate NEW skills:\n{json.dumps(cand_summ, indent=2)}\n"
+            "Return the indices of candidates that are functionally redundant with an existing "
+            "skill (same detection purpose), even if the category differs. Keep genuinely-new ones."
+        )
+        try:
+            out = self.client.structured(
+                system="You decide whether two security checks have the same purpose. Be strict about true redundancy.",
+                user=user, tool=tool, tool_name="flag_redundant",
+                audit_meta={"agent_role": "spec-deduper", "chars_sent": len(user)},
+            )
+        except LlmError:
+            return []
+        valid = range(len(candidates))
+        return [i for i in out.get("duplicate_indices", []) if isinstance(i, int) and i in valid]
+
+
 def _evidence_index(observations: dict) -> dict[str, str]:
     """Flatten observations into pointer_key -> string for citation/resolution."""
     index: dict[str, str] = {}

@@ -10,6 +10,7 @@ from .reasoners import (
     ClaudePlanner,
     ClaudeRecon,
     ClaudeSkillGenerator,
+    ClaudeSpecDeduper,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "ClaudeLearner",
     "ClaudeRecon",
     "ClaudeSkillGenerator",
+    "ClaudeSpecDeduper",
 ]

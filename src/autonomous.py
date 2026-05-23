@@ -21,8 +21,8 @@ from src.measure import _write_outputs, build_scorecard
 from src.orchestrator import build_orchestrator
 
 
-def _print(report, scorecard: Optional[dict]) -> None:
-    print(f"=== autonomous assessment ({'live' if scorecard and scorecard['mode'] == 'live' else 'offline'}) ===")
+def _print(report, scorecard: Optional[dict], live: bool) -> None:
+    print(f"=== autonomous assessment ({'live' if live else 'offline'}) ===")
     print(f"authorization : {report.authorization_id}")
     print(f"identity      : {'VERIFIED' if report.identity_ok else 'UNVERIFIED'}")
     print(f"brains        : {'Claude (LLM)' if report.llm_active else 'deterministic'}")
@@ -41,7 +41,8 @@ def _print(report, scorecard: Optional[dict]) -> None:
         a = report.generation_audit
         print(f"\ngeneration    : proposed {a.get('proposed', 0)}, "
               f"rejected-unsafe {a.get('rejected_unsafe', 0)}, "
-              f"dropped-duplicate {a.get('dropped_duplicate', 0)}, created {a.get('created', 0)}")
+              f"dropped-duplicate {a.get('dropped_duplicate', 0)}, "
+              f"dropped-semantic {a.get('dropped_semantic', 0)}, created {a.get('created', 0)}")
     print(f"\nskills CREATED this run ({len(report.generated_skills)}):")
     for g in report.generated_skills:
         status = "signal" if g["has_signal"] else ("ran" if g["ran"] else f"BLOCKED ({g['blocked_reason']})")
@@ -84,7 +85,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                                     "live" if args.live else "offline")
         scorecard["mode"] = "autonomous-" + scorecard["mode"]
         scorecard["scorecard_path"] = _write_outputs(scorecard, args.out)
-    _print(report, scorecard)
+    _print(report, scorecard, args.live)
     return 0
 
 

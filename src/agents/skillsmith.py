@@ -59,21 +59,30 @@ def generate_skills(
     allowed_testing: set[str],
     existing_specs: list[SkillSpec] = (),
     existing_cards: list[dict] = (),
+    semantic_deduper=None,
     audit: Optional[dict] = None,
 ) -> list[SkillSpec]:
     """Reasoner proposals -> validated, deduped, runnable SkillSpecs.
 
-    If `audit` is given, it is populated with how many proposals were rejected by
-    the trust boundary vs. dropped as duplicates — so silent drops are visible
-    (a self-improving system wants to know when its generator produces junk)."""
+    Dedupe layers applied here: structural/capability (always), then an optional
+    *semantic* layer (`semantic_deduper`) that catches functional duplicates the
+    structural layers miss — e.g. an LLM re-deriving an existing check under a
+    different category. If `audit` is given it records every drop, so silent
+    losses are visible (a self-improving system wants to know what it discarded)."""
     raw = reasoner.propose(profile, list(existing_cards))
     valid = [s for s in (coerce_or_reject(p, allowed_testing=allowed_testing) for p in raw) if s is not None]
-    unique = dedupe_specs(valid, existing_specs=existing_specs, existing_skill_cards=existing_cards)
+    structural = dedupe_specs(valid, existing_specs=existing_specs, existing_skill_cards=existing_cards)
+
+    unique = structural
+    if semantic_deduper is not None and structural:
+        redundant = set(semantic_deduper.redundant(structural, list(existing_cards)))
+        unique = [s for i, s in enumerate(structural) if i not in redundant]
     if audit is not None:
         audit.update({
             "proposed": len(raw),
             "rejected_unsafe": len(raw) - len(valid),
-            "dropped_duplicate": len(valid) - len(unique),
+            "dropped_duplicate": len(valid) - len(structural),
+            "dropped_semantic": len(structural) - len(unique),
             "created": len(unique),
         })
     return unique

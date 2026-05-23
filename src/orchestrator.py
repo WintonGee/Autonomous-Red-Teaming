@@ -118,6 +118,7 @@ class Orchestrator:
         learner: Optional[Learner] = None,
         recon=None,
         skill_generator=None,
+        spec_deduper=None,
         evidence_dir: Optional[str] = None,
         generated_dir=None,
         rate_sleep: Optional[Callable[[float], None]] = None,
@@ -134,6 +135,7 @@ class Orchestrator:
         self.learner = learner or Learner()
         self.recon = recon or RuleBasedRecon()
         self.skill_generator = skill_generator or RuleBasedSkillGenerator()
+        self.spec_deduper = spec_deduper  # optional semantic dedupe (LLM); None = skip
         self.generated_dir = generated_dir  # None -> skills/_generated (the live library)
         self.evidence_dir = evidence_dir
         self.llm_client = llm_client  # set when LLM brains are active; None otherwise
@@ -331,7 +333,8 @@ class Orchestrator:
             existing_specs = [s.spec for s in self.skills.all() if isinstance(s, SpecSkill)]
             audit: dict = {}
             new_specs = generate_skills(self.skill_generator, profile, allowed_testing=allowed,
-                                        existing_specs=existing_specs, existing_cards=existing_cards, audit=audit)
+                                        existing_specs=existing_specs, existing_cards=existing_cards,
+                                        semantic_deduper=self.spec_deduper, audit=audit)
             report.generation_audit = audit
             for spec in new_specs:
                 entry = {"skill_id": spec.id, "category": spec.category, "source": spec.source,
@@ -579,12 +582,12 @@ def build_orchestrator(
 
     # LLM brains activate only when a client is available (ANTHROPIC_API_KEY set);
     # otherwise the deterministic reasoners are used. The LLM proposes; code gates.
-    planner = evaluator = learner = recon = skill_generator = None
+    planner = evaluator = learner = recon = skill_generator = spec_deduper = None
     active_client = None
     if llm:
         from src.agents.llm import (
             ClaudeClient, ClaudeEvaluator, ClaudeLearner, ClaudePlanner,
-            ClaudeRecon, ClaudeSkillGenerator,
+            ClaudeRecon, ClaudeSkillGenerator, ClaudeSpecDeduper,
         )
         client = llm_client if llm_client is not None else ClaudeClient()
         if client.available():
@@ -594,13 +597,14 @@ def build_orchestrator(
             learner = Learner(ClaudeLearner(client, RuleBasedLearner()))
             recon = ClaudeRecon(client, RuleBasedRecon())
             skill_generator = ClaudeSkillGenerator(client, RuleBasedSkillGenerator())
+            spec_deduper = ClaudeSpecDeduper(client)
 
     return Orchestrator(
         store=store, guard=guard, risk_engine=risk_engine,
         skill_registry=SkillRegistry.with_defaults(), scorer=Scorer(store.conn),
         fetch=fetch, evidence_dir=evidence_dir,
         planner=planner, evaluator=evaluator, learner=learner,
-        recon=recon, skill_generator=skill_generator, llm_client=active_client,
+        recon=recon, skill_generator=skill_generator, spec_deduper=spec_deduper, llm_client=active_client,
         rate_sleep=(None if not dry_run else (lambda _seconds: None)),  # offline: don't actually sleep
     )
 
