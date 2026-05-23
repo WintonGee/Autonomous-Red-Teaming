@@ -240,6 +240,195 @@ class ClaudeLearner:
         return proposals
 
 
+class ClaudeRecon:
+    """Builds a SiteProfile by reasoning over recon observations. Falls back to the
+    deterministic heuristic recon when unavailable or on error. Observations are
+    redacted before they leave the process."""
+
+    def __init__(self, client: ClaudeClient, fallback) -> None:
+        self.client = client
+        self.fallback = fallback
+
+    def understand(self, target_url: str, observations: list[dict]):
+        from src.agents.recon import SiteProfile
+
+        if not self.client.available() or not observations:
+            return self.fallback.understand(target_url, observations)
+        safe_obs = []
+        for ob in observations:
+            body, _ = redact(ob.get("body_head", ""))
+            headers = {k: redact(str(v))[0] for k, v in ob.get("headers", {}).items()}
+            safe_obs.append({"path": ob["path"], "status": ob["status"],
+                             "headers": headers, "body_head": body[:1500]})
+        tool = {
+            "name": "describe_site",
+            "description": "Summarize the target and flag security-relevant observations and coverage gaps.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "tech": {"type": "array", "items": {"type": "string"}},
+                    "notable": {"type": "array", "items": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}, "note": {"type": "string"}},
+                        "required": ["path", "note"], "additionalProperties": False}},
+                    "gaps": {"type": "array", "items": {
+                        "type": "object",
+                        "properties": {"category": {"type": "string"}, "hint": {"type": "string"},
+                                       "path": {"type": "string"}},
+                        "required": ["category", "hint"], "additionalProperties": False}},
+                },
+                "required": ["summary", "tech", "notable", "gaps"],
+                "additionalProperties": False,
+            },
+        }
+        user = (
+            f"Target: {target_url}\nRecon observations (redacted):\n{json.dumps(safe_obs, indent=2)}\n"
+            "Describe the site, its likely tech, security-relevant notes per path, and any "
+            "coverage GAPS (issue categories worth a dedicated detection skill)."
+        )
+        try:
+            out = self.client.structured(
+                system="You are a web security recon analyst. Be concrete and evidence-based.",
+                user=user, tool=tool, tool_name="describe_site",
+                audit_meta={"agent_role": "recon", "chars_sent": len(user)},
+            )
+        except LlmError:
+            return self.fallback.understand(target_url, observations)
+
+        by_path: dict[str, list[str]] = {ob["path"]: [] for ob in observations}
+        for item in out.get("notable", []):
+            by_path.setdefault(item.get("path", ""), []).append(item.get("note", ""))
+        obs_out = [{"path": ob["path"], "status": ob["status"], "notable": by_path.get(ob["path"], [])}
+                   for ob in observations]
+        return SiteProfile(
+            target_url=target_url, summary=out.get("summary", ""),
+            tech=list(out.get("tech", [])), observations=obs_out,
+            gaps=[g for g in out.get("gaps", []) if g.get("category")],
+            notes=["[claude] recon"],
+        )
+
+
+class ClaudeSkillGenerator:
+    """Proposes new declarative skill specs for a site's gaps. The LLM only
+    authors specs (data); `coerce_or_reject` + dedupe downstream decide what runs.
+    The existing catalog is passed in so the model avoids proposing duplicates
+    (the prompt-level dedupe layer)."""
+
+    def __init__(self, client: ClaudeClient, fallback) -> None:
+        self.client = client
+        self.fallback = fallback
+
+    def propose(self, profile, existing_cards: list[dict]) -> list[dict]:
+        if not self.client.available():
+            return self.fallback.propose(profile, existing_cards)
+        catalog = sorted({c.get("category") for c in existing_cards if c.get("category")})
+        condition = {
+            "type": "object",
+            "properties": {
+                "check": {"type": "string", "enum": [
+                    "header_present", "header_absent", "header_contains", "header_lacks",
+                    "status_equals", "body_contains", "body_matches"]},
+                "header": {"type": "string"}, "substring": {"type": "string"},
+                "pattern": {"type": "string"}, "value": {"type": "integer"},
+            },
+            "required": ["check"], "additionalProperties": False,
+        }
+        proposal = {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string"}, "name": {"type": "string"}, "title": {"type": "string"},
+                "action_type": {"type": "string", "enum": [
+                    "reconnaissance", "web-misconfiguration-checks", "safe-validation"]},
+                "risk_level": {"type": "integer", "minimum": 0, "maximum": 2},
+                "severity": {"type": "string", "enum": ["info", "low", "medium", "high"]},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "probes": {"type": "array", "items": {
+                    "type": "object", "properties": {"path": {"type": "string"}},
+                    "required": ["path"], "additionalProperties": False}},
+                "detect": {"type": "object", "properties": {
+                    "mode": {"type": "string", "enum": ["any", "all"]},
+                    "conditions": {"type": "array", "items": condition}},
+                    "required": ["mode", "conditions"], "additionalProperties": False},
+            },
+            "required": ["category", "action_type", "risk_level", "severity", "probes", "detect"],
+            "additionalProperties": False,
+        }
+        tool = {
+            "name": "propose_skills",
+            "description": "Propose new safe (GET-only, risk<=2) detection skills as declarative specs.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"proposals": {"type": "array", "items": proposal}},
+                "required": ["proposals"], "additionalProperties": False,
+            },
+        }
+        user = (
+            f"Site understanding:\n{json.dumps({'summary': profile.summary, 'tech': profile.tech, 'gaps': profile.gaps}, indent=2)}\n"
+            f"Existing skill categories (DO NOT duplicate): {catalog}\n"
+            "Propose up to 3 NEW safe detection skills (GET-only, risk<=2) as declarative specs "
+            "for genuine gaps. Use only the provided detect checks."
+        )
+        try:
+            out = self.client.structured(
+                system="You author safe, declarative web-security detection skills. Never duplicate an existing category.",
+                user=user, tool=tool, tool_name="propose_skills",
+                audit_meta={"agent_role": "skill-generator", "chars_sent": len(user)},
+            )
+        except LlmError:
+            return self.fallback.propose(profile, existing_cards)
+        proposals = list(out.get("proposals") or [])[:_MAX_LLM_FINDINGS]
+        for p in proposals:
+            p.setdefault("source", "llm-generated")
+        return proposals
+
+
+class ClaudeSpecDeduper:
+    """Semantic dedupe layer: flags generated specs that are functionally redundant
+    with an existing skill even when categorized differently (which the structural
+    layers miss). Returns indices to drop; on unavailable/error it drops nothing
+    (fail open — the human review gate remains the backstop)."""
+
+    def __init__(self, client: ClaudeClient) -> None:
+        self.client = client
+
+    def redundant(self, candidates, existing_cards: list[dict]) -> list[int]:
+        if not self.client.available() or not candidates:
+            return []
+        cand_summ = [{
+            "index": i, "category": c.category, "title": c.title, "action_type": c.action_type,
+            "probes": [p["path"] for p in c.probes],
+            "checks": [cond.get("check") for cond in c.detect.get("conditions", [])],
+        } for i, c in enumerate(candidates)]
+        existing_summ = [{"id": c.get("id"), "name": c.get("name"), "category": c.get("category")}
+                         for c in existing_cards]
+        tool = {
+            "name": "flag_redundant",
+            "description": "Flag candidate skills that duplicate an existing skill's purpose.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"duplicate_indices": {"type": "array", "items": {"type": "integer"}}},
+                "required": ["duplicate_indices"], "additionalProperties": False,
+            },
+        }
+        user = (
+            f"Existing skills:\n{json.dumps(existing_summ, indent=2)}\n"
+            f"Candidate NEW skills:\n{json.dumps(cand_summ, indent=2)}\n"
+            "Return the indices of candidates that are functionally redundant with an existing "
+            "skill (same detection purpose), even if the category differs. Keep genuinely-new ones."
+        )
+        try:
+            out = self.client.structured(
+                system="You decide whether two security checks have the same purpose. Be strict about true redundancy.",
+                user=user, tool=tool, tool_name="flag_redundant",
+                audit_meta={"agent_role": "spec-deduper", "chars_sent": len(user)},
+            )
+        except LlmError:
+            return []
+        valid = range(len(candidates))
+        return [i for i in out.get("duplicate_indices", []) if isinstance(i, int) and i in valid]
+
+
 def _evidence_index(observations: dict) -> dict[str, str]:
     """Flatten observations into pointer_key -> string for citation/resolution."""
     index: dict[str, str] = {}

@@ -95,7 +95,7 @@ def test_engagement_finds_real_issues_and_dedups():
     r1 = orch.run_engagement("local-juice-shop", "assess")
 
     assert r1.identity_ok is True
-    assert len(r1.skill_outcomes) == 2          # both skills attempted
+    assert len(r1.skill_outcomes) == 5          # all registered skills attempted
     assert all(o["ran"] for o in r1.skill_outcomes)
     assert len(r1.findings) >= 1                 # success criterion: >=1 finding
     assert all(f["new"] for f in r1.findings)

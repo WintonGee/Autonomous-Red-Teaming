@@ -176,11 +176,16 @@ Example:
 {
   "id": "local-juice-shop",
   "environment": "learning-lab",
-  "target": "http://localhost:3000",
+  "target": "http://localhost:3001",
   "target_type": "web-application",
   "owner": "Personal lab",
   "authorized_by": "Winton Gee",
-  "authorization_source": "owned-local-environment",
+  "authorization_source": "owned-local-container",
+  "expected_identity": {
+    "title_contains": "OWASP Juice Shop",
+    "marker_path": "/rest/admin/application-version",
+    "marker_contains": "version"
+  },
   "allowed_testing": [
     "reconnaissance",
     "web-misconfiguration-checks",
@@ -193,17 +198,22 @@ Example:
     "denial-of-service"
   ],
   "rate_limit": {
-    "max_requests_per_second": 2,
+    "max_requests_per_second": 4,
     "max_concurrent_requests": 1
   },
-  "risk_limit": "low",
+  "risk_limit": "medium",
   "valid_from": "2026-05-10",
   "valid_until": "2026-12-31",
   "policy_url": null,
-  "last_reviewed": "2026-05-10",
-  "notes": "Local lab target only. Do not test external third-party systems."
+  "last_reviewed": "2026-05-21",
+  "notes": "Local Docker Juice Shop on :3001 (owned). Safe-active checks authorized; no destructive/DoS/credential testing. Identity is fingerprint-verified before each engagement."
 }
 ```
+
+The `expected_identity` block is verified at runtime: before any engagement the
+guard fetches the target and confirms it is the application it claims to be
+(title + a marker endpoint), so a check can never run against the wrong host that
+happens to answer on the right port. This is enforced in code and fails closed.
 
 ## Risk levels
 
@@ -217,7 +227,13 @@ Every skill and action should have a risk level.
 | 3 | Intrusive | Attempts exploitation, authentication boundary testing, or actions that may change state. | Requires human approval. Disabled by default. |
 | 4 | Prohibited | Destructive, stealthy, persistent, availability-impacting, or credential-theft behavior. | Not allowed in this project. |
 
-The system should start with levels 0 and 1 only.
+The system started with levels 0 and 1 only. It now also runs level 2 (safe
+active) where a target's authorization explicitly elevates its `risk_limit` to
+`medium` — the current Juice Shop lab does this, enabling the level-2
+`exposed_sensitive_paths` skill. Level 3+ remains gated behind the (not-yet-built)
+human-approval gate; level 4 is never allowed. The `RiskEngine` honors each
+target's authorized limit directly and falls back to a conservative project
+ceiling only for a missing or malformed authorization.
 
 ## System architecture
 
@@ -405,7 +421,7 @@ Example:
 {
   "id": "finding-2026-0001",
   "title": "Missing Content-Security-Policy Header",
-  "target": "http://localhost:3000",
+  "target": "http://localhost:3001",
   "affected_component": "HTTP response headers",
   "category": "web-misconfiguration",
   "severity": "low",
@@ -520,42 +536,56 @@ autonomous-red-teaming/
 
 ## Roadmap
 
-### Phase 0: project foundation
+Status as of 2026-05-23: Phases 0–5 are built and tested, and a **fully
+autonomous mode** runs the whole loop point-and-go (`python -m src.autonomous`):
+it understands a target (recon → plan), tries the existing skill arsenal, then
+**creates, dedupes, and runs new skills** for the gaps it finds. New skills are
+declarative specs (data, not code) executed by a trusted interpreter, capped at
+risk ≤2, and persisted so the library grows across runs (promotion to the trusted
+set stays human-reviewed). The LLM drives recon + skill generation when
+`ANTHROPIC_API_KEY` is set; deterministic heuristics run otherwise. A measurement
+harness scores rediscovery against `groundtruth/juice-shop.json`, which also lists
+known *coverage gaps* so the rate stays honest and names the next skill to build —
+the autonomous loop has been shown closing such a gap live. Still open: a report
+writer, embedding/semantic dedup, LLM-directed crawling, and active (risk-3)
+testing. Phases 6–7 are not started.
+
+### Phase 0: project foundation — done
 
 - Define this README as the project charter.
 - Create the folder structure.
 - Add example authorization, skill, and finding files.
 - Decide the first language and runtime.
 
-### Phase 1: authorization and safety
+### Phase 1: authorization and safety — done
 
 - Implement target authorization checks.
 - Implement expiration checks.
 - Implement risk-level enforcement.
 - Add audit logs for all blocked and allowed actions.
 
-### Phase 2: first discovery loop
+### Phase 2: first discovery loop — done
 
 - Run OWASP Juice Shop locally.
 - Add a missing security headers skill.
 - Execute the skill only after authorization passes.
 - Save evidence and generate a finding report.
 
-### Phase 3: skill registry and deduplication
+### Phase 3: skill registry and deduplication — done (exact dedup; semantic dedup pending)
 
 - Store skills as structured files.
 - Search existing skills before adding new ones.
 - Add duplicate detection for skills and findings.
 - Add tests for deduplication behavior.
 
-### Phase 4: AI planning layer
+### Phase 4: AI planning layer — done (Claude reasoners active when ANTHROPIC_API_KEY is set)
 
 - Let the AI propose a test plan from available skills.
 - Require the authorization guard to approve every proposed action.
 - Store AI reasoning summaries in the audit log.
 - Keep execution deterministic where possible.
 
-### Phase 5: learning loop
+### Phase 5: learning loop — done (LLM + deterministic distillation; measured by rediscovery rate)
 
 - Let the AI propose new skills from confirmed findings.
 - Require human review before saving generated skills.

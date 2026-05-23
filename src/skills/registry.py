@@ -5,8 +5,11 @@ from typing import Optional
 
 from src.memory.store import MemoryStore
 from src.skills.base import Skill
+from src.skills.web.cors_misconfiguration import CorsMisconfiguration
 from src.skills.web.exposed_sensitive_paths import ExposedSensitivePaths
+from src.skills.web.info_disclosure_headers import InfoDisclosureHeaders
 from src.skills.web.missing_security_headers import MissingSecurityHeaders
+from src.skills.web.verbose_errors import VerboseErrors
 
 
 class SkillRegistry:
@@ -27,6 +30,9 @@ class SkillRegistry:
         registry = cls()
         registry.register(MissingSecurityHeaders())
         registry.register(ExposedSensitivePaths())
+        registry.register(CorsMisconfiguration())
+        registry.register(InfoDisclosureHeaders())
+        registry.register(VerboseErrors())
         return registry
 
     def seed_semantic(self, store: MemoryStore) -> None:

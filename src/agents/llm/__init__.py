@@ -4,7 +4,14 @@ Activates automatically when ANTHROPIC_API_KEY is set; otherwise the agents fall
 back to their deterministic reasoners. The LLM proposes; code still gates.
 """
 from .client import ClaudeClient, LlmError
-from .reasoners import ClaudeEvaluator, ClaudeLearner, ClaudePlanner
+from .reasoners import (
+    ClaudeEvaluator,
+    ClaudeLearner,
+    ClaudePlanner,
+    ClaudeRecon,
+    ClaudeSkillGenerator,
+    ClaudeSpecDeduper,
+)
 
 __all__ = [
     "ClaudeClient",
@@ -12,4 +19,7 @@ __all__ = [
     "ClaudePlanner",
     "ClaudeEvaluator",
     "ClaudeLearner",
+    "ClaudeRecon",
+    "ClaudeSkillGenerator",
+    "ClaudeSpecDeduper",
 ]

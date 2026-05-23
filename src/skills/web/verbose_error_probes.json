@@ -1,0 +1,4 @@
+[
+  {"path": "/api/Feedbacks/99999", "why": "Request for a non-existent resource returns a verbose framework error page"},
+  {"path": "/rest/products/notanumber/reviews", "why": "Malformed identifier may surface a database/validation error"}
+]

@@ -43,7 +43,10 @@ class ExposedSensitivePaths(Skill):
             if resp.status_code != 200:
                 continue
             marker = probe.get("expect_contains")
-            if marker and marker.lower() not in resp.body.lower():
+            # Evidence over claims: a bare 200 is NOT proof a resource is sensitive.
+            # Single-page apps return 200 + index.html for unknown paths, so require
+            # a content marker the app shell would not contain before reporting.
+            if not marker or marker.lower() not in resp.body.lower():
                 continue
             exposed.append({
                 "path": probe["path"],

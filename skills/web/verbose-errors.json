@@ -1,0 +1,12 @@
+{
+  "id": "web.verbose_errors",
+  "purpose": "Detect endpoints that return verbose error pages leaking stack traces, framework error classes, or internal file paths.",
+  "when_to_use": "Safe-active check (risk 2) on an authorized web application once passive checks are done. Requires an authorization that permits safe-validation. Probe paths are read-only GETs that should not change state.",
+  "detection_approach": "Send read-only GETs to a configured set of probe paths likely to trigger errors, then scan the response body for error-page signatures (stack frames like 'at file:line', framework error classes such as SequelizeDatabaseError/UnauthorizedError, language tracebacks). Report any endpoint whose response matches.",
+  "references": [
+    {"url": "https://owasp.org/www-community/Improper_Error_Handling", "title": "OWASP: Improper Error Handling", "verified_at": "2026-05-21"},
+    {"url": "https://cwe.mitre.org/data/definitions/209.html", "title": "CWE-209: Generation of Error Message Containing Sensitive Information", "verified_at": "2026-05-21"}
+  ],
+  "tags": ["error-handling", "information-disclosure", "http", "stack-trace"],
+  "status": "active"
+}

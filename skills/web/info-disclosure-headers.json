@@ -1,0 +1,12 @@
+{
+  "id": "web.info_disclosure_headers",
+  "purpose": "Identify response headers that leak implementation detail (framework, versions, internal paths/hosts) useful to an attacker.",
+  "when_to_use": "Baseline check on any authorized web application (risk 1, passive). Complements the missing-security-headers check: that one flags absent protections, this one flags present-but-leaky headers.",
+  "detection_approach": "Fetch the target and compare response headers against a configured watch-list (X-Powered-By, Server with version, X-AspNet(-Mvc)-Version, X-Recruiting, Via, X-Backend-Server). Report the leaky headers actually present.",
+  "references": [
+    {"url": "https://owasp.org/www-project-secure-headers/", "title": "OWASP Secure Headers Project", "verified_at": "2026-05-21"},
+    {"url": "https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html", "title": "OWASP HTTP Security Headers Cheat Sheet", "verified_at": "2026-05-21"}
+  ],
+  "tags": ["headers", "http", "information-disclosure", "fingerprinting"],
+  "status": "active"
+}
