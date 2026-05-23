@@ -14,8 +14,8 @@ errors. Either way the LLM only *proposes*: the Guard and RiskEngine gate every
 action in code, and LLM-discovered findings are persisted as `pending_review`,
 never auto-trusted.
 
-**The self-improvement loop is now closed and measured.** Five safe web skills
-ship (risk ≤2). End-of-engagement distillation (`memory/distill.py`) reads the
+**The self-improvement loop is now closed and measured.** A library of safe web
+skills (risk ≤2) ships. End-of-engagement distillation (`memory/distill.py`) reads the
 episodic finding log and proposes a reusable, human-reviewed skill for any
 finding-category with no covering skill — so an issue the LLM Evaluator surfaces
 in a category we lack becomes a skill the next run rediscovers deterministically.
